@@ -1,6 +1,6 @@
-import React from "react";
 import {
   AbsoluteFill,
+  Audio,
   Img,
   OffthreadVideo,
   interpolate,
@@ -51,6 +51,7 @@ export const MediaScene: React.FC<MediaSceneProps> = ({ scene, theme }) => {
           <OffthreadVideo
             src={staticFile(scene.mediaFile)}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            volume={1}
           />
         ) : scene.mediaStatus === "image" && scene.mediaFile ? (
           <Img
@@ -97,11 +98,14 @@ export const MediaScene: React.FC<MediaSceneProps> = ({ scene, theme }) => {
       <AbsoluteFill
         style={{
           justifyContent: "flex-end",
-          paddingBottom: 140,
+          paddingBottom: 50,
         }}
       >
         <Subtitle text={scene.text} highlightWords={scene.highlightWords} theme={theme} />
       </AbsoluteFill>
+
+      {/* Scene narration audio */}
+      {scene.audioFile && <Audio src={staticFile(scene.audioFile)} />}
     </AbsoluteFill>
   );
 };

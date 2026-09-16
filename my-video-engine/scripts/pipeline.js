@@ -53,7 +53,7 @@ function main() {
   // Step 1: Generate TTS audio
   run(
     "Step 1/2: Generating TTS Audio",
-    "python3 scripts/tts_generator.py"
+    "node scripts/tts_generator.js"
   );
 
   // Step 2: Render video with Remotion

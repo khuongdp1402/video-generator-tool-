@@ -12,6 +12,14 @@ import os
 import sys
 import time
 
+# Ensure proper utf-8 encoding on Windows console
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import edge_tts
 from mutagen.mp3 import MP3
 

@@ -42,18 +42,24 @@ async function generateSceneMedia(page, scene, mediaDir) {
 
   const outputPath = path.join(mediaDir, `scene_${scene.id}.mp4`);
 
-  try {
-    const res = await page.request.get(videoSrc);
-    const buffer = await res.body();
-    fs.writeFileSync(outputPath, buffer);
-  } catch (_reqErr) {
-    const buffer = await page.evaluate(async (url) => {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const ab = await blob.arrayBuffer();
-      return Array.from(new Uint8Array(ab));
-    }, videoSrc);
-    fs.writeFileSync(outputPath, Buffer.from(buffer));
+  let downloaded = false;
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      const res = await page.request.get(videoSrc);
+      if (res.ok()) {
+        const buffer = await res.body();
+        fs.writeFileSync(outputPath, buffer);
+        downloaded = true;
+        break;
+      }
+    } catch (e) {
+      console.log(`[Scene ${scene.id}] Thử tải lần ${attempt} chưa thành công (${e.message}), chờ 3s thử lại...`);
+    }
+    await page.waitForTimeout(3000);
+  }
+
+  if (!downloaded) {
+    throw new Error(`Không thể tải video từ URL cho scene ${scene.id} sau 6 lần thử`);
   }
 
   console.log(`[Scene ${scene.id}] Đã lưu video thành công: ${outputPath}`);

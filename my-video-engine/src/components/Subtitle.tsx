@@ -22,14 +22,14 @@ export const Subtitle: React.FC<SubtitleProps> = ({
   startDelay = 10,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
-  const words = text.split(/\s+/);
+  const words = text.split(/\s+/).filter(Boolean);
   const totalWords = words.length;
 
-  // Each word gets a window of frames to "light up"
-  // Total animation = totalWords * framesPerWord
-  const framesPerWord = Math.max(4, Math.floor(60 / totalWords));
+  // Distribute words evenly across the scene duration (leaving margin at end)
+  const availableFrames = Math.max(30, durationInFrames - startDelay - 15);
+  const framesPerWord = totalWords > 0 ? availableFrames / totalWords : 10;
 
   return (
     <div
