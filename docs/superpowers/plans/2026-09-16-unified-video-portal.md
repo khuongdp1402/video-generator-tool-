@@ -1706,6 +1706,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `public/index.html` — add nav button (in the slot vacated in Task 2) + new tab section
 - Modify: `public/app.js` — add `headings` entry, button listeners, and a new module block
+- Modify: `server.js` — add a `/media` static mount so scene-preview thumbnails resolve (Step 3)
 
 **Interfaces:**
 - Consumes: the 6 routes from Task 12
