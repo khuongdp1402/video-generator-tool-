@@ -11,9 +11,11 @@ export interface VideoMeta {
   musicVolume: number;
   voice?: string;
   voiceRate?: string;
+  /** "16:9" (1280x720) or "9:16" (720x1280). Defaults to "16:9" if absent. */
+  aspectRatio?: "16:9" | "9:16";
 }
 
-export type SceneType = "headline" | "bullet_points" | "tip" | "outro" | "dialogue" | "story" | "whiteboard" | "media";
+export type SceneType = "headline" | "bullet_points" | "tip" | "outro" | "dialogue" | "story" | "whiteboard" | "media" | "lesson";
 
 export interface DrawingItem {
   type: string;

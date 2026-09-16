@@ -100,6 +100,7 @@ function renderScene(scene: VideoData["scenes"][0], themeColors: ThemeColors) {
     case "whiteboard":
       return <WhiteboardScene scene={scene} theme={themeColors} />;
     case "outro":
+    case "lesson":
       return <OutroScene scene={scene} theme={themeColors} />;
     case "media":
       return <MediaScene scene={scene} theme={themeColors} />;
