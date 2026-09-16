@@ -112,6 +112,14 @@ server.registerTool(
     },
   },
   async ({ title, theme, bgMusic, musicVolume, voice, voiceRate, scenes }) => {
+    let existingScenesById = new Map();
+    try {
+      const prior = await readScenario();
+      existingScenesById = new Map(prior.scenes.map((s) => [s.id, s]));
+    } catch {
+      // No prior scenario on disk yet — every scene is new, nothing to carry forward.
+    }
+
     const data = {
       meta: {
         title,
@@ -121,17 +129,25 @@ server.registerTool(
         ...(voice ? { voice } : {}),
         ...(voiceRate ? { voiceRate } : {}),
       },
-      scenes: scenes.map((s) => ({
-        id: s.id,
-        type: s.type,
-        text: s.text,
-        audioFile: "",
-        durationInFrames: estimateDurationFrames(s.text),
-        ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
-        ...(s.imagePrompt ? { imagePrompt: s.imagePrompt } : {}),
-        ...(s.videoPrompt ? { videoPrompt: s.videoPrompt } : {}),
-        mediaStatus: "pending",
-      })),
+      scenes: scenes.map((s) => {
+        const existing = existingScenesById.get(s.id);
+        const textUnchanged = existing && existing.text === s.text;
+        return {
+          id: s.id,
+          type: s.type,
+          text: s.text,
+          // Only carry forward audio/media from a prior save if this scene's
+          // text is unchanged — otherwise stale narration would no longer
+          // match what's on screen. New/edited scenes always start blank.
+          audioFile: textUnchanged ? existing.audioFile || "" : "",
+          durationInFrames: textUnchanged ? existing.durationInFrames : estimateDurationFrames(s.text),
+          ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
+          ...(s.imagePrompt ? { imagePrompt: s.imagePrompt } : {}),
+          ...(s.videoPrompt ? { videoPrompt: s.videoPrompt } : {}),
+          mediaStatus: textUnchanged && existing.mediaStatus ? existing.mediaStatus : "pending",
+          ...(textUnchanged && existing.mediaFile ? { mediaFile: existing.mediaFile } : {}),
+        };
+      }),
     };
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
     await writeScenario(data);
@@ -183,8 +199,8 @@ server.registerTool(
   async () => {
     try {
       const { stdout, stderr } = await execFileAsync(
-        "python3",
-        ["scripts/tts_generator.py"],
+        "node",
+        ["scripts/tts_generator.js"],
         { cwd: ENGINE_ROOT, maxBuffer: 20 * 1024 * 1024 },
       );
       return textResult({ ok: true, stdout, stderr });
