@@ -19,6 +19,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Cho phép stream video MP4 hỗ trợ Range headers
 app.use('/storage/raw', express.static(path.join(__dirname, 'storage', 'raw')));
 app.use('/storage/remake', express.static(path.join(__dirname, 'storage', 'remake')));
+app.use('/storage/video-gen', express.static(path.join(__dirname, 'storage', 'video-gen')));
 
 // storage/ is gitignored (per-machine runtime state, see Task 1 of the
 // unified-portal plan), so on a fresh clone it doesn't exist at all yet.
@@ -47,6 +48,34 @@ function saveDb(data) {
 }
 
 const minioService = new MinioService();
+
+const videoGenStore = require('./services/videoGenerator/store');
+const { getDimensions } = require('./services/videoGenerator/stylePresets');
+const { connectToGeminiPage } = require('./services/videoGenerator/geminiChat');
+const { planScenes } = require('./services/videoGenerator/director');
+const { generateSceneMedia } = require('./services/videoGenerator/mediaGen');
+const { generateSceneAudio } = require('./services/videoGenerator/ttsGenerator');
+const { renderProject } = require('./services/videoGenerator/render');
+
+const MEDIA_DIR = path.join(__dirname, 'my-video-engine', 'public', 'media');
+const AUDIO_DIR = path.join(__dirname, 'my-video-engine', 'public', 'audio');
+
+// Only one Playwright-driven generation job may run at a time — there is one
+// shared Chrome tab talking to Gemini Ultra (see plan Global Constraints).
+let generationBusy = false;
+function withGenerationLock(handler) {
+  return async (req, res) => {
+    if (generationBusy) {
+      return res.status(409).json({ error: 'Đang có 1 job tạo video khác chạy, vui lòng đợi.' });
+    }
+    generationBusy = true;
+    try {
+      await handler(req, res);
+    } finally {
+      generationBusy = false;
+    }
+  };
+}
 
 // 1. Phân giải link Douyin (Xem trước thông tin)
 app.post('/api/scrape-info', async (req, res) => {
@@ -371,6 +400,148 @@ app.post('/api/targets', (req, res) => {
     res.json({ success: true, targets });
   } else {
     res.status(400).json({ error: 'Dữ liệu kênh không hợp lệ' });
+  }
+});
+
+// 23. Tạo project mới + chia scene (Gemini Ultra chat, không tốn phí API)
+app.post('/api/video-gen/plan', withGenerationLock(async (req, res) => {
+  try {
+    const { kind, aspectRatio, rawScript, lessonText, title } = req.body;
+    if (!rawScript || !rawScript.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập kịch bản' });
+    }
+    try {
+      getDimensions(aspectRatio); // throws early with a clear message if aspectRatio is invalid
+    } catch (dimErr) {
+      return res.status(400).json({ error: dimErr.message });
+    }
+    const project = videoGenStore.createProject({ kind, aspectRatio, rawScript, lessonText: lessonText || '' });
+    if (title) videoGenStore.updateProject(project.id, { title });
+
+    const { page } = await connectToGeminiPage();
+    const scenes = await planScenes(page, rawScript, kind);
+
+    const updated = videoGenStore.updateProject(project.id, {
+      status: 'planned',
+      scenes,
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Lỗi lập kế hoạch scene:', err);
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// 24. Sinh media + audio cho toàn bộ scene rồi render
+app.post('/api/video-gen/:id/generate', withGenerationLock(async (req, res) => {
+  try {
+    const { id } = req.params;
+    const project = videoGenStore.getProject(id);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+
+    videoGenStore.updateProject(id, { status: 'generating_media' });
+    const { page } = await connectToGeminiPage();
+
+    for (const scene of project.scenes) {
+      if (scene.mediaStatus === 'video') continue; // already generated (retry-safe)
+      try {
+        const result = await generateSceneMedia(page, scene, MEDIA_DIR);
+        scene.mediaStatus = result.mediaStatus;
+        scene.mediaFile = result.mediaFile;
+        scene.error = null;
+      } catch (sceneErr) {
+        scene.mediaStatus = 'pending';
+        scene.error = sceneErr.message;
+      }
+      videoGenStore.updateProject(id, { scenes: project.scenes });
+    }
+
+    const anyFailed = project.scenes.some((s) => s.mediaStatus !== 'video');
+    if (anyFailed) {
+      const updated = videoGenStore.updateProject(id, { status: 'media_failed' });
+      return res.json({ success: true, data: updated });
+    }
+
+    videoGenStore.updateProject(id, { status: 'generating_audio' });
+    for (let i = 0; i < project.scenes.length; i++) {
+      const audioResult = await generateSceneAudio(
+        project.scenes[i],
+        project.meta.voice,
+        project.meta.voiceRate,
+        AUDIO_DIR
+      );
+      project.scenes[i] = audioResult;
+      videoGenStore.updateProject(id, { scenes: project.scenes });
+    }
+
+    videoGenStore.updateProject(id, { status: 'rendering' });
+    const outputPath = renderProject(videoGenStore.getProject(id));
+
+    const updated = videoGenStore.updateProject(id, { status: 'done', outputPath });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Lỗi generate video:', err);
+    videoGenStore.updateProject(req.params.id, { status: 'failed' });
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// 25. Sinh lại media cho 1 scene bị lỗi
+app.post('/api/video-gen/:id/retry-scene/:sceneId', withGenerationLock(async (req, res) => {
+  try {
+    const { id, sceneId } = req.params;
+    const project = videoGenStore.getProject(id);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+    const scene = project.scenes.find((s) => String(s.id) === sceneId);
+    if (!scene) return res.status(404).json({ error: 'Không tìm thấy scene' });
+
+    const { page } = await connectToGeminiPage();
+    const result = await generateSceneMedia(page, scene, MEDIA_DIR);
+    scene.mediaStatus = result.mediaStatus;
+    scene.mediaFile = result.mediaFile;
+    scene.error = null;
+
+    const updated = videoGenStore.updateProject(id, { scenes: project.scenes });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Lỗi retry scene:', err);
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// 26. Lấy trạng thái 1 project
+app.get('/api/video-gen/:id', (req, res) => {
+  const project = videoGenStore.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+  res.json({ success: true, data: project });
+});
+
+// 27. Danh sách project đã tạo
+app.get('/api/video-gen', (req, res) => {
+  res.json({ success: true, data: videoGenStore.listProjects() });
+});
+
+// 28. Đăng video đã render lên TikTok
+app.post('/api/video-gen/:id/publish/tiktok', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { caption } = req.body;
+    const project = videoGenStore.getProject(id);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+    if (!project.outputPath || !fs.existsSync(project.outputPath)) {
+      return res.status(400).json({ error: 'Video chưa render xong' });
+    }
+
+    const finalCaption = caption && caption.trim() ? caption.trim() : (project.title || project.kind);
+    const uploadResult = await TikTokUploader.uploadVideo(project.outputPath, finalCaption);
+
+    const updated = videoGenStore.updateProject(id, {
+      publishing: { tiktok: { posted: true, postedAt: new Date().toISOString(), url: uploadResult.url || null } },
+    });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Lỗi đăng TikTok:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
