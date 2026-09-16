@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "video-engine": {
+      "command": "node",
+      "args": ["mcp-server/src/index.js"],
+      "cwd": "."
+    }
+  }
+}
