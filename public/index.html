@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Douyin Reup Pipeline & Video Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h2>Douyin Reup</h2>
+          <span>AI & FFmpeg Pipeline</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-download">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span>1. Cào Video (Downloader)</span>
+        </button>
+        <button class="nav-item" data-tab="tab-remake">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+          <span>2. Remake & Lách Thuật Toán</span>
+        </button>
+        <button class="nav-item" data-tab="tab-minio">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+          <span>3. Lưu Trữ MinIO (S3)</span>
+        </button>
+        <button class="nav-item" data-tab="tab-publisher">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          <span>4. Kế Hoạch Đăng Bài</span>
+        </button>
+        <button class="nav-item" data-tab="tab-autopilot" style="border: 1px solid rgba(56, 189, 248, 0.3); background: rgba(56, 189, 248, 0.05);">
+          <svg width="18" height="18" fill="none" stroke="#38bdf8" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+          <span style="color: #38bdf8; font-weight: 700;">5. Autopilot Tự Động 100%</span>
+        </button>
+        <button class="nav-item" data-tab="tab-video-factory">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect><polygon points="23 7 16 12 23 17 23 7"></polygon></svg>
+          <span>6. AI Video Factory</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-status">
+        <div class="status-indicator online"></div>
+        <div class="status-info">
+          <small>FFmpeg Engine</small>
+          <strong>H264 / AAC Ready</strong>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Header -->
+      <header class="topbar">
+        <div class="page-title">
+          <h1 id="page-heading">Cào Video Douyin Không Logo</h1>
+          <p id="page-subheading">Nhập link chia sẻ Douyin để phân giải stream video gốc không watermark</p>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-secondary" id="btn-refresh-list">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            Làm mới danh sách
+          </button>
+        </div>
+      </header>
+
+      <!-- TAB 1: DOWNLOADER -->
+      <section id="tab-download" class="tab-content active">
+        <div class="card scraper-card">
+          <div class="card-header">
+            <h3>Nhập Link Douyin Cần Tải</h3>
+            <span class="badge">Hỗ trợ link app & web v.douyin.com</span>
+          </div>
+          <div class="card-body">
+            <div class="input-group">
+              <input type="text" id="input-douyin-url" placeholder="Dán link Douyin (ví dụ: https://v.douyin.com/iRxxxxx/ hoặc chuỗi copy từ app)..." />
+              <button class="btn btn-primary" id="btn-start-download">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Tải Ngay
+              </button>
+            </div>
+            <div class="help-links">
+              <span>Mẹo: Bạn có thể dán toàn bộ văn bản chia sẻ từ app Douyin, hệ thống sẽ tự bóc tách link.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Download Status/Progress Banner -->
+        <div id="download-progress-box" class="progress-banner hidden">
+          <div class="spinner"></div>
+          <div class="progress-info">
+            <strong id="progress-text">Đang phân giải link video Douyin...</strong>
+            <small>Đang bóc tách luồng video không watermark (No Logo)...</small>
+          </div>
+        </div>
+
+        <!-- Video Library / Downloaded Videos Grid -->
+        <div class="section-title">
+          <h3>Danh Sách Video Đã Tải Về Máy (<span id="video-count">0</span>)</h3>
+        </div>
+        <div id="video-grid" class="video-grid">
+          <!-- Video cards will render here -->
+        </div>
+      </section>
+
+      <!-- TAB 2: REMAKE -->
+      <section id="tab-remake" class="tab-content">
+        <div class="grid-2-col">
+          <div class="card">
+            <div class="card-header">
+              <h3>Tùy Chọn Bộ Lọc Lách Thuật Toán</h3>
+              <span class="badge badge-accent">FFmpeg Multi-Filter</span>
+            </div>
+            <div class="card-body">
+              <div class="select-video-wrap">
+                <label>Chọn Video Cần Remake:</label>
+                <select id="select-remake-video" class="form-select">
+                  <option value="">-- Chọn video trong thư viện --</option>
+                </select>
+              </div>
+
+              <div class="filter-options">
+                <label class="checkbox-card">
+                  <input type="checkbox" id="opt-flip" checked>
+                  <div class="checkbox-text">
+                    <strong>Lật Gương Ngang (Horizontal Flip)</strong>
+                    <p>Đổi hướng khung hình từ trái sang phải để né nhận diện AI</p>
+                  </div>
+                </label>
+
+                <label class="checkbox-card" style="border-color: #f59e0b; background: rgba(245, 158, 11, 0.08);">
+                  <input type="checkbox" id="opt-remove-sub" checked>
+                  <div class="checkbox-text">
+                    <strong style="color: #fbbf24;">⚡ Cắt Bỏ Phụ Đề Tiếng Trung Ở Đáy</strong>
+                    <p>Tự động cắt dải 13% mép dưới video để xóa sạch chữ tiếng Trung và zoom cận cảnh món ăn</p>
+                  </div>
+                </label>
+
+                <label class="checkbox-card">
+                  <input type="checkbox" id="opt-zoom" checked>
+                  <div class="checkbox-text">
+                    <strong>Zoom & Cắt Viền (Crop 4%)</strong>
+                    <p>Thu phóng nhẹ 4% và căn giữa để thay đổi tọa độ pixel</p>
+                  </div>
+                </label>
+
+                <label class="checkbox-card">
+                  <input type="checkbox" id="opt-color" checked>
+                  <div class="checkbox-text">
+                    <strong>Tinh Chỉnh Màu Sắc (Color Grade)</strong>
+                    <p>Tăng tương phản +3%, tăng bão hòa màu +4% để tạo mã khung hình mới</p>
+                  </div>
+                </label>
+
+                <label class="checkbox-card">
+                  <input type="checkbox" id="opt-pitch" checked>
+                  <div class="checkbox-text">
+                    <strong>Đổi Tần Số Âm Thanh (Audio Pitch Shift)</strong>
+                    <p>Lệch tần số nhẹ 1.5% để lách bản quyền âm nhạc & fingerprint</p>
+                  </div>
+                </label>
+
+                <div class="form-group-inline">
+                  <label>Tốc độ video:</label>
+                  <select id="opt-speed" class="form-select-sm">
+                    <option value="1.0">1.0x (Giữ nguyên)</option>
+                    <option value="1.02" selected>1.02x (Tăng nhẹ 2% - Khuyên dùng)</option>
+                    <option value="1.05">1.05x (Tăng 5%)</option>
+                  </select>
+                </div>
+              </div>
+
+              <button class="btn btn-primary btn-block" id="btn-run-remake">
+                ⚡ Tiến Hành Remake Bằng FFmpeg
+              </button>
+            </div>
+          </div>
+
+          <!-- Video Compare Player -->
+          <div class="card">
+            <div class="card-header">
+              <h3>So Sánh Video Gốc vs Remake</h3>
+              <span id="remake-status-badge" class="badge">Chưa xử lý</span>
+            </div>
+            <div class="card-body">
+              <div class="compare-container">
+                <div class="player-box">
+                  <h4>Video Gốc</h4>
+                  <video id="player-original" controls></video>
+                  <div class="md5-tag" id="md5-original">MD5: ---</div>
+                </div>
+                <div class="player-box">
+                  <h4>Video Remake (Đã Lách)</h4>
+                  <video id="player-remade" controls></video>
+                  <div class="md5-tag" id="md5-remade">MD5: ---</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: MINIO S3 -->
+      <section id="tab-minio" class="tab-content">
+        <div class="grid-2-col">
+          <div class="card">
+            <div class="card-header">
+              <h3>Cấu Hình Kết Nối MinIO</h3>
+              <span class="badge">Self-Hosted S3</span>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label>MinIO Endpoint URL:</label>
+                <input type="text" id="minio-endpoint" value="http://localhost:9000" placeholder="http://127.0.0.1:9000" />
+              </div>
+              <div class="form-group">
+                <label>Access Key:</label>
+                <input type="text" id="minio-access-key" value="minioadmin" />
+              </div>
+              <div class="form-group">
+                <label>Secret Key:</label>
+                <input type="password" id="minio-secret-key" value="minioadmin" />
+              </div>
+              <div class="form-group">
+                <label>Bucket Name:</label>
+                <input type="text" id="minio-bucket" value="douyin-videos" />
+              </div>
+              <div class="button-row">
+                <button class="btn btn-secondary" id="btn-test-minio">Kiểm Tra Kết Nối</button>
+                <button class="btn btn-primary" id="btn-save-minio">Lưu Cấu Hình</button>
+              </div>
+              <div id="minio-test-alert" class="alert hidden"></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Đẩy Video Lên MinIO</h3>
+            </div>
+            <div class="card-body">
+              <div class="select-video-wrap">
+                <label>Chọn Video Cần Đẩy:</label>
+                <select id="select-minio-video" class="form-select">
+                  <option value="">-- Chọn video trong thư viện --</option>
+                </select>
+              </div>
+              <div class="checkbox-card" style="margin: 1rem 0;">
+                <input type="checkbox" id="minio-use-remake" checked>
+                <div class="checkbox-text">
+                  <strong>Ưu tiên đẩy bản Remake</strong>
+                  <p>Nếu video đã được remake, đẩy bản remake thay vì video thô</p>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-block" id="btn-upload-minio">
+                ☁️ Upload Lên MinIO Bucket
+              </button>
+              <div id="minio-upload-result" class="upload-result-box hidden">
+                <h4>Đã tải lên MinIO thành công!</h4>
+                <div class="result-item"><strong>S3 Key:</strong> <span id="res-s3-key"></span></div>
+                <div class="result-item"><strong>Presigned Stream URL:</strong> <a id="res-presigned-url" target="_blank" href="#">Mở link phát video</a></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: PUBLISHER PLAN -->
+      <section id="tab-publisher" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <h3>Chiến Lược & Kế Hoạch Đăng Bài Tự Động (TikTok & YouTube Shorts)</h3>
+            <span class="badge badge-accent">Auto-Upload Plan</span>
+          </div>
+          <div class="card-body">
+            <div class="plan-grid">
+              <div class="plan-box">
+                <div class="plan-header youtube-color">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                  <h4>YouTube Shorts</h4>
+                </div>
+                <ul class="plan-list">
+                  <li><strong>Giao thức:</strong> YouTube Data API v3 chính thống (Không sợ bị quét bot).</li>
+                  <li><strong>Khung giờ vàng:</strong> 11:30 - 13:00 và 19:30 - 21:00.</li>
+                  <li><strong>Tần suất an toàn:</strong> 2 - 4 video Shorts / ngày.</li>
+                  <li><strong>Tối ưu hóa:</strong> Tiêu đề kèm đuôi <code>#Shorts #viral</code>, đặt thumbnail tự động.</li>
+                </ul>
+              </div>
+
+              <div class="plan-box">
+                <div class="plan-header tiktok-color">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-1.01-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.24 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
+                  <h4>TikTok Platform</h4>
+                </div>
+                <ul class="plan-list">
+                  <li><strong>Giao thức:</strong> Playwright Headless Automation (Mô phỏng trình duyệt người dùng thật).</li>
+                  <li><strong>Khung giờ vàng:</strong> 07:30, 12:15, 18:30, 21:00.</li>
+                  <li><strong>Tần suất an toàn:</strong> 2 - 3 video / ngày (giãn cách tối thiểu 2.5 giờ).</li>
+                  <li><strong>Kháng 0 View:</strong> Dùng Residential Proxy nếu đánh thị trường US/UK. Bắt buộc Remake video (MD5 + Flip + Crop) trước khi post.</li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- Code snippet tabs -->
+            <div class="snippet-section">
+              <h4>Mã Tự Động Hóa Mẫu (Playwright TikTok & Google YouTube API):</h4>
+              <div class="code-box">
+                <pre><code id="code-snippet-view">Đang tải mã nguồn mẫu...</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- TAB 5: AUTOPILOT -->
+      <section id="tab-autopilot" class="tab-content">
+        <div class="grid-2-col">
+          <!-- Điều Khiển Autopilot -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Bảng Điều Khiển Autopilot 24/7</h3>
+              <span id="autopilot-status-badge" class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">Đang Tắt</span>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                <button class="btn btn-primary" id="btn-toggle-autopilot" style="flex: 1;">
+                  ⚡ Bật Chế Độ Tự Động Hoá (Autopilot)
+                </button>
+                <button class="btn btn-secondary" id="btn-post-now" title="Đăng ngay video tiếp theo trong hàng đợi">
+                  🚀 Đăng 1 Video Ngay
+                </button>
+              </div>
+
+              <div class="checkbox-card" style="margin-bottom: 16px; border-color: #38bdf8;">
+                <div class="checkbox-text" style="width: 100%;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong style="color: #38bdf8;">Kết Nối Tài Khoản TikTok</strong>
+                    <span id="tiktok-login-badge" class="badge">Đang kiểm tra...</span>
+                  </div>
+                  <div style="background: rgba(0,0,0,0.25); border-radius: 8px; padding: 12px; margin-top: 10px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 12px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">⚡ Cách 1: Dán SessionID từ TikTok đang mở (Nhanh nhất 5s - Khuyên dùng)</div>
+                    <p style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px;">
+                      Mở tab TikTok của bạn -> Bấm F12 -> tab <b>Application</b> (hoặc Ứng dụng) -> <b>Cookies</b> -> <b>tiktok.com</b> -> Copy giá trị <code>sessionid</code> và dán vào đây:
+                    </p>
+                    <div class="input-group">
+                      <input type="text" id="input-tiktok-cookie" placeholder="Dán mã sessionid hoặc toàn bộ Cookie TikTok vào đây..." />
+                      <button class="btn btn-primary" id="btn-save-tiktok-cookie">💾 Lưu Cookie</button>
+                    </div>
+                  </div>
+
+                  <div style="margin-top: 12px;">
+                    <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px;">🌐 Cách 2: Mở Trình Duyệt Để Đăng Nhập / Quét QR</div>
+                    <div style="display: flex; gap: 8px;">
+                      <button class="btn btn-secondary" id="btn-open-tiktok-login" style="flex: 1;">
+                        🔑 Mở Cửa Sổ Đăng Nhập TikTok
+                      </button>
+                      <button class="btn btn-secondary" id="btn-close-tiktok-login" style="flex: 1;" title="Bấm vào đây khi đã đăng nhập xong">
+                        💾 Đã Xong (Lưu Phiên)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label>Khung Giờ Đăng Tự Động Hàng Ngày (2-4 video):</label>
+                <div style="display: flex; gap: 8px; font-family: var(--font-mono);">
+                  <span class="badge badge-accent">⏰ 11:30 (Trưa)</span>
+                  <span class="badge badge-accent">⏰ 17:30 (Chiều)</span>
+                  <span class="badge badge-accent">⏰ 20:30 (Tối)</span>
+                  <span class="badge badge-accent">⏰ 22:30 (Đêm)</span>
+                </div>
+              </div>
+
+              <div style="margin-top: 16px;">
+                <button class="btn btn-secondary btn-block" id="btn-manual-scan">
+                  🔄 Quét Ngay 3 Kênh Mục Tiêu (Cào & Remake Tự Động)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kênh Mục Tiêu -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Kênh Mục Tiêu Cào Tự Động (Targets)</h3>
+              <span class="badge badge-accent">3 Kênh Mukbang Đã Đánh Dấu</span>
+            </div>
+            <div class="card-body">
+              <div id="targets-list" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+                <!-- Target channel items -->
+              </div>
+              <div class="input-group">
+                <input type="text" id="input-new-target-url" placeholder="Thêm link kênh TikTok/Douyin mới..." />
+                <button class="btn btn-primary" id="btn-add-target">+ Thêm Kênh</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hàng Đợi Video & Nhật Ký Hoạt Động -->
+        <div class="grid-2-col">
+          <div class="card">
+            <div class="card-header">
+              <h3>Hàng Đợi Chờ Đăng (<span id="queue-count">0</span> Video Đã Remake Sẵn Sàng)</h3>
+            </div>
+            <div class="card-body">
+              <div id="queue-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto;">
+                <!-- Queue items -->
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Nhật Ký Tự Động Hoá (Live Activity Logs)</h3>
+              <button class="btn btn-secondary" id="btn-refresh-logs" style="padding: 4px 8px; font-size: 11px;">Làm mới log</button>
+            </div>
+            <div class="card-body">
+              <div id="autopilot-logs-box" class="code-box" style="height: 250px; font-size: 11.5px;">
+                <!-- Logs stream -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: AI VIDEO FACTORY -->
+      <section id="tab-video-factory" class="tab-content">
+        <div class="card vf-panel">
+          <div class="card-header">
+            <h3>Tạo Video Bằng AI (Kịch Bản → Storyboard → Video)</h3>
+            <span class="badge badge-accent">Gemini + Veo</span>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label>Kịch bản video:</label>
+              <textarea id="vfScriptInput" rows="6" class="vf-textarea" placeholder="Nhập kịch bản..."></textarea>
+            </div>
+            <button class="btn btn-primary btn-block" id="vfGenerateStoryboardBtn">🎬 Generate Storyboard</button>
+
+            <div id="vfProjectView" class="vf-project-view" hidden>
+              <div id="vfSceneGrid" class="vf-scene-grid"></div>
+              <div id="vfCostEstimate" class="vf-cost-estimate"></div>
+              <div class="button-row">
+                <button class="btn btn-primary" id="vfApproveBtn" hidden>✅ Approve & Generate Videos</button>
+                <button class="btn btn-secondary" id="vfComposeBtn" hidden>🎞️ Compose Final Video</button>
+              </div>
+              <video id="vfFinalVideo" controls hidden></video>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
