@@ -20,6 +20,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/storage/raw', express.static(path.join(__dirname, 'storage', 'raw')));
 app.use('/storage/remake', express.static(path.join(__dirname, 'storage', 'remake')));
 app.use('/storage/video-gen', express.static(path.join(__dirname, 'storage', 'video-gen')));
+app.use('/media', express.static(path.join(__dirname, 'my-video-engine', 'public', 'media')));
 
 // storage/ is gitignored (per-machine runtime state, see Task 1 of the
 // unified-portal plan), so on a fresh clone it doesn't exist at all yet.

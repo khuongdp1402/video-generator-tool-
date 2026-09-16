@@ -15,7 +15,8 @@ function initTabs() {
     'tab-remake': { title: 'Xử Lý Remake Video FFmpeg', sub: 'Lật khung hình, zoom cắt viền, tinh chỉnh màu sắc và đổi mã MD5 để lách thuật toán' },
     'tab-minio': { title: 'Lưu Trữ Video MinIO S3', sub: 'Tự động đẩy video thô và video remake lên Object Storage cá nhân' },
     'tab-publisher': { title: 'Kế Hoạch & Tự Động Đăng Bài', sub: 'Chiến lược lên lịch và mã nguồn tự động hóa cho TikTok và YouTube Shorts' },
-    'tab-autopilot': { title: 'Cỗ Máy Tự Động Autopilot 24/7', sub: 'Tự động cào video mới từ các kênh đánh dấu, tự remake lách bản quyền và đăng 2-4 video/ngày' }
+    'tab-autopilot': { title: 'Cỗ Máy Tự Động Autopilot 24/7', sub: 'Tự động cào video mới từ các kênh đánh dấu, tự remake lách bản quyền và đăng 2-4 video/ngày' },
+    'tab-video-gen': { title: 'Tạo Video AI', sub: 'Nhập kịch bản, chọn style, để Gemini Ultra chia scene, sinh media và render qua Remotion' }
   };
 
   tabs.forEach(tab => {
@@ -56,6 +57,11 @@ function setupEventListeners() {
   document.getElementById('btn-post-now')?.addEventListener('click', handlePostNow);
   document.getElementById('btn-add-target')?.addEventListener('click', handleAddTarget);
   document.getElementById('btn-refresh-logs')?.addEventListener('click', loadAutopilotData);
+
+  // Video Generator listeners
+  document.getElementById('vgPlanBtn')?.addEventListener('click', vgPlanScenes);
+  document.getElementById('vgGenerateBtn')?.addEventListener('click', vgGenerateAndRender);
+  document.getElementById('vgPublishBtn')?.addEventListener('click', vgPublishToTikTok);
 
   document.getElementById('select-remake-video').addEventListener('change', (e) => {
     const video = videoLibrary.find(v => v.id === e.target.value);
@@ -648,4 +654,127 @@ function escapeHtml(str) {
     '"': '&quot;',
     "'": '&#039;'
   }[m]));
+}
+
+// 9. VIDEO GENERATOR MODULE FUNCTIONS
+let vgCurrentProjectId = null;
+
+async function vgPlanScenes() {
+  const rawScript = document.getElementById('vgScriptInput').value.trim();
+  if (!rawScript) return alert('Vui lòng nhập kịch bản');
+
+  const btn = document.getElementById('vgPlanBtn');
+  btn.disabled = true;
+  btn.innerText = '⏳ Đang chia scene (Gemini Ultra)...';
+
+  try {
+    const res = await fetch('/api/video-gen/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: document.getElementById('vgKind').value,
+        aspectRatio: document.getElementById('vgAspectRatio').value,
+        title: document.getElementById('vgTitle').value.trim(),
+        rawScript,
+        lessonText: document.getElementById('vgLessonText').value.trim(),
+      }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert(json.error);
+
+    vgCurrentProjectId = json.data.id;
+    document.getElementById('vgProjectView').hidden = false;
+    vgRenderProject(json.data);
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '🎬 Chia Scene';
+  }
+}
+
+function vgRenderProject(project) {
+  const grid = document.getElementById('vgSceneGrid');
+  grid.innerHTML = project.scenes.map((scene) => `
+    <div class="vf-scene-card">
+      <div class="vf-scene-status">${escapeHtml(scene.mediaStatus || 'pending')}</div>
+      ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split('/').pop())}" muted></video>` : ''}
+      <p>${escapeHtml(scene.text)}</p>
+      ${scene.mediaStatus !== 'video' ? `<button class="btn btn-secondary" onclick="vgRetryScene('${scene.id}')">Tạo lại media</button>` : ''}
+    </div>
+  `).join('');
+
+  document.getElementById('vgGenerateBtn').hidden = false;
+
+  if (project.status === 'done' && project.outputPath) {
+    const video = document.getElementById('vgFinalVideo');
+    video.src = `/storage/video-gen/${project.id}/output.mp4`;
+    video.hidden = false;
+    document.getElementById('vgPublishBox').hidden = false;
+  }
+}
+
+async function vgRetryScene(sceneId) {
+  try {
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/retry-scene/${sceneId}`, { method: 'POST' });
+    const json = await res.json();
+    if (!json.success) return alert(json.error);
+    vgRenderProject(json.data);
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  }
+}
+
+async function vgGenerateAndRender() {
+  const btn = document.getElementById('vgGenerateBtn');
+  btn.disabled = true;
+  btn.innerText = '⏳ Đang sinh media + render (có thể mất vài phút)...';
+
+  // The /generate call blocks server-side until every scene is done (same
+  // pattern the old AI Video Factory used) — poll GET /api/video-gen/:id
+  // in the background so the scene grid shows live per-scene status
+  // instead of staying frozen for the whole duration.
+  const pollInterval = setInterval(async () => {
+    try {
+      const statusRes = await fetch(`/api/video-gen/${vgCurrentProjectId}`);
+      const statusJson = await statusRes.json();
+      if (statusJson.success) vgRenderProject(statusJson.data);
+    } catch (_err) {
+      // Ignore transient poll failures — the final fetch below is authoritative.
+    }
+  }, 4000);
+
+  try {
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, { method: 'POST' });
+    const json = await res.json();
+    if (!json.success) return alert(json.error);
+    vgRenderProject(json.data);
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  } finally {
+    clearInterval(pollInterval);
+    btn.disabled = false;
+    btn.innerText = '🎨 Sinh Media + Render';
+  }
+}
+
+async function vgPublishToTikTok() {
+  const btn = document.getElementById('vgPublishBtn');
+  btn.disabled = true;
+  btn.innerText = '⏳ Đang đăng...';
+  try {
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/publish/tiktok`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption: document.getElementById('vgCaption').value.trim() }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert(json.error);
+    alert('Đã đăng TikTok thành công!');
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '📤 Đăng TikTok';
+  }
 }
