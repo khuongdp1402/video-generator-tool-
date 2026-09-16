@@ -40,6 +40,16 @@ app.use('/storage/raw', express.static(path.join(__dirname, 'storage', 'raw')));
 app.use('/storage/remake', express.static(path.join(__dirname, 'storage', 'remake')));
 app.use('/storage/video-factory', express.static(path.join(__dirname, 'storage', 'video-factory')));
 
+// storage/ is gitignored (per-machine runtime state, see Task 1 of the
+// unified-portal plan), so on a fresh clone it doesn't exist at all yet.
+// Create the subdirectories the download/remake routes write into up front,
+// mirroring the existing self-mkdir pattern used below in
+// videoFactoryProjectDir(), so those routes don't ENOENT on first use.
+['raw', 'remake'].forEach((sub) => {
+  const dir = path.join(__dirname, 'storage', sub);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
+
 const DATA_FILE = path.join(__dirname, 'storage', 'database.json');
 
 function getDb() {
