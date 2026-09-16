@@ -8,25 +8,6 @@ const DouyinScraper = require('./services/scraper');
 const VideoRemaker = require('./services/remaker');
 const MinioService = require('./services/minioClient');
 const { PUBLISHER_STRATEGY, TIKTOK_PLAYWRIGHT_SNIPPET, YOUTUBE_API_SNIPPET } = require('./services/publisherPlan');
-// videoFactory/ backend was intentionally not copied during the Task 1 relocation
-// (it's the old Gemini/Veo API module, removed whole in Task 2 of the unified-portal
-// plan). Guard these requires so the rest of the portal still boots; routes under
-// /api/video-projects* (the "AI Video Factory" tab) will error until Task 2 replaces
-// this module.
-let videoFactoryStore, estimateVeoCostUsd, createGeminiClient, generateScenePlan,
-  generateCharacterImage, generateSceneImage, startSceneVideo, pollSceneVideo,
-  downloadSceneVideo, composeProjectVideo;
-try {
-  videoFactoryStore = require('./services/videoFactory/store');
-  ({ estimateVeoCostUsd } = require('./services/videoFactory/costEstimate'));
-  ({ createGeminiClient } = require('./services/videoFactory/geminiClient'));
-  ({ generateScenePlan } = require('./services/videoFactory/director'));
-  ({ generateCharacterImage, generateSceneImage } = require('./services/videoFactory/imageGen'));
-  ({ startSceneVideo, pollSceneVideo, downloadSceneVideo } = require('./services/videoFactory/videoGen'));
-  ({ composeProjectVideo } = require('./services/videoFactory/compose'));
-} catch (err) {
-  console.warn('[videoFactory] backend not available (not migrated yet):', err.message);
-}
 
 const app = express();
 const PORT = process.env.PORT || 3050;
@@ -38,13 +19,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Cho phép stream video MP4 hỗ trợ Range headers
 app.use('/storage/raw', express.static(path.join(__dirname, 'storage', 'raw')));
 app.use('/storage/remake', express.static(path.join(__dirname, 'storage', 'remake')));
-app.use('/storage/video-factory', express.static(path.join(__dirname, 'storage', 'video-factory')));
 
 // storage/ is gitignored (per-machine runtime state, see Task 1 of the
 // unified-portal plan), so on a fresh clone it doesn't exist at all yet.
 // Create the subdirectories the download/remake routes write into up front,
-// mirroring the existing self-mkdir pattern used below in
-// videoFactoryProjectDir(), so those routes don't ENOENT on first use.
+// so those routes don't ENOENT on first use.
 ['raw', 'remake'].forEach((sub) => {
   const dir = path.join(__dirname, 'storage', sub);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -392,218 +371,6 @@ app.post('/api/targets', (req, res) => {
     res.json({ success: true, targets });
   } else {
     res.status(400).json({ error: 'Dữ liệu kênh không hợp lệ' });
-  }
-});
-
-// Scene ở các trạng thái này đã có ảnh nên đủ điều kiện chạy (hoặc chạy lại) Veo.
-const VIDEO_RENDERABLE_SCENE_STATUSES = ['image_ready', 'video_ready', 'failed'];
-
-function videoFactoryProjectDir(projectId) {
-  const dir = path.join(__dirname, 'storage', 'video-factory', projectId);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-// 17. Tạo project mới từ kịch bản (AI Director chia scene)
-app.post('/api/video-projects', async (req, res) => {
-  try {
-    const { script } = req.body;
-    if (!script || !script.trim()) {
-      return res.status(400).json({ error: 'Vui lòng nhập kịch bản' });
-    }
-    const project = videoFactoryStore.createProject(script);
-    const client = await createGeminiClient();
-    const plan = await generateScenePlan(client, script);
-
-    const updated = videoFactoryStore.updateProject(project.id, {
-      status: 'draft',
-      characterRef: plan.characterDescription
-        ? { prompt: plan.characterDescription, imagePath: null, status: 'pending' }
-        : null,
-      scenes: plan.scenes,
-      estimatedVeoCostUsd: estimateVeoCostUsd(plan.scenes)
-    });
-
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('Lỗi tạo video project:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 18. Sinh ảnh nhân vật + ảnh từng scene
-app.post('/api/video-projects/:id/generate-images', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const project = videoFactoryStore.getProject(id);
-    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-
-    const dir = videoFactoryProjectDir(id);
-    const client = await createGeminiClient();
-
-    let characterRefPath = null;
-    if (project.characterRef) {
-      characterRefPath = path.join(dir, 'character.png');
-      await generateCharacterImage(client, project.characterRef.prompt, characterRefPath);
-      project.characterRef.imagePath = characterRefPath;
-      project.characterRef.status = 'ready';
-    }
-
-    for (const scene of project.scenes) {
-      try {
-        const scenePath = path.join(dir, `${scene.id}_image.png`);
-        await generateSceneImage(client, scene, characterRefPath, scenePath);
-        scene.imagePath = scenePath;
-        scene.status = 'image_ready';
-      } catch (sceneErr) {
-        scene.status = 'failed';
-        scene.error = sceneErr.message;
-      }
-    }
-
-    // Chỉ coi là images_ready khi có ít nhất 1 scene sinh ảnh thành công,
-    // nếu toàn bộ scene đều lỗi thì project là failed (tránh mở cổng duyệt tốn phí Veo).
-    const anyImageReady = project.scenes.some((s) => s.status === 'image_ready');
-
-    const updated = videoFactoryStore.updateProject(id, {
-      status: anyImageReady ? 'images_ready' : 'failed',
-      characterRef: project.characterRef,
-      scenes: project.scenes
-    });
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('Lỗi sinh ảnh video project:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 19. Sinh lại ảnh của 1 scene cụ thể
-app.post('/api/video-projects/:id/scenes/:sceneId/regenerate-image', async (req, res) => {
-  try {
-    const { id, sceneId } = req.params;
-    const project = videoFactoryStore.getProject(id);
-    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-    // Ghi đè project.scenes lúc đang render sẽ xoá mất trạng thái/đường dẫn video
-    // của các scene render xong (đã tốn tiền) trong vòng lặp đang chạy.
-    if (project.status === 'rendering') {
-      return res.status(409).json({ error: 'Không thể sửa ảnh khi đang render video, vui lòng đợi hoàn tất' });
-    }
-    const scene = project.scenes.find((s) => s.id === sceneId);
-    if (!scene) return res.status(404).json({ error: 'Không tìm thấy scene' });
-
-    if (req.body.imagePrompt) scene.imagePrompt = req.body.imagePrompt;
-
-    const dir = videoFactoryProjectDir(id);
-    const client = await createGeminiClient();
-    const characterRefPath = project.characterRef?.imagePath || null;
-    const scenePath = path.join(dir, `${scene.id}_image.png`);
-
-    await generateSceneImage(client, scene, characterRefPath, scenePath);
-    scene.imagePath = scenePath;
-    scene.status = 'image_ready';
-    scene.error = null;
-
-    const updated = videoFactoryStore.updateProject(id, { scenes: project.scenes });
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('Lỗi sinh lại ảnh scene:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 20. Duyệt storyboard, bắt đầu tạo video (tốn phí Veo)
-app.post('/api/video-projects/:id/approve-and-generate-videos', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const project = videoFactoryStore.getProject(id);
-    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-    if (project.status === 'rendering') {
-      return res.status(400).json({ error: 'Project đang render video, vui lòng đợi hoàn tất trước khi thử lại' });
-    }
-
-    // Không được bắt đầu tốn phí Veo khi ảnh scene chưa sẵn sàng.
-    // video_ready/failed là trạng thái hợp lệ khi render lại sau lần chạy lỗi một phần
-    // (ảnh của scene đó đã được sinh xong từ trước).
-    const notReady = project.scenes.find(
-      (s) => !VIDEO_RENDERABLE_SCENE_STATUSES.includes(s.status) || !s.imagePath || !fs.existsSync(s.imagePath)
-    );
-    if (notReady) {
-      return res.status(400).json({ error: `Scene ${notReady.id} chưa sẵn sàng (${notReady.status})` });
-    }
-
-    videoFactoryStore.updateProject(id, { status: 'rendering' });
-
-    const dir = videoFactoryProjectDir(id);
-    const client = await createGeminiClient();
-    const characterRefPath = project.characterRef?.imagePath || null;
-
-    for (const scene of project.scenes) {
-      // Scene đã render xong từ lần chạy trước: bỏ qua để không gọi (và trả tiền) Veo lần nữa.
-      if (scene.status === 'video_ready' && scene.videoPath && fs.existsSync(scene.videoPath)) {
-        continue;
-      }
-      try {
-        scene.status = 'video_processing';
-        videoFactoryStore.updateProject(id, { scenes: project.scenes });
-
-        const operationName = await startSceneVideo(client, scene, scene.imagePath, characterRefPath);
-        scene.veoOperationName = operationName;
-        videoFactoryStore.updateProject(id, { scenes: project.scenes });
-
-        const videoFile = await pollSceneVideo(client, operationName);
-        const videoPath = path.join(dir, `${scene.id}_video.mp4`);
-        await downloadSceneVideo(client, videoFile, videoPath);
-
-        scene.videoPath = videoPath;
-        scene.status = 'video_ready';
-      } catch (sceneErr) {
-        scene.status = 'failed';
-        scene.error = sceneErr.message;
-      }
-      videoFactoryStore.updateProject(id, { scenes: project.scenes });
-    }
-
-    const allReady = project.scenes.every((s) => s.status === 'video_ready');
-    videoFactoryStore.updateProject(id, { status: allReady ? 'videos_ready' : 'failed' });
-
-    res.json({ success: true, data: videoFactoryStore.getProject(id) });
-  } catch (err) {
-    console.error('Lỗi tạo video scenes:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 21. Lấy trạng thái 1 project
-app.get('/api/video-projects/:id', (req, res) => {
-  const project = videoFactoryStore.getProject(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-  res.json({ success: true, data: project });
-});
-
-// 22. Ghép video cuối cùng (FFmpeg + phụ đề)
-app.post('/api/video-projects/:id/compose', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const project = videoFactoryStore.getProject(id);
-    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
-
-    const notReady = project.scenes.find((s) => s.status !== 'video_ready');
-    if (notReady) {
-      return res.status(400).json({ error: `Scene ${notReady.id} chưa sẵn sàng (${notReady.status})` });
-    }
-
-    const dir = videoFactoryProjectDir(id);
-    const outputPath = path.join(dir, 'final.mp4');
-    await composeProjectVideo(project.scenes, outputPath, dir);
-
-    const updated = videoFactoryStore.updateProject(id, {
-      status: 'done',
-      finalVideoPath: outputPath
-    });
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('Lỗi ghép video cuối:', err);
-    res.status(500).json({ error: err.message });
   }
 });
 

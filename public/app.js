@@ -15,8 +15,7 @@ function initTabs() {
     'tab-remake': { title: 'Xử Lý Remake Video FFmpeg', sub: 'Lật khung hình, zoom cắt viền, tinh chỉnh màu sắc và đổi mã MD5 để lách thuật toán' },
     'tab-minio': { title: 'Lưu Trữ Video MinIO S3', sub: 'Tự động đẩy video thô và video remake lên Object Storage cá nhân' },
     'tab-publisher': { title: 'Kế Hoạch & Tự Động Đăng Bài', sub: 'Chiến lược lên lịch và mã nguồn tự động hóa cho TikTok và YouTube Shorts' },
-    'tab-autopilot': { title: 'Cỗ Máy Tự Động Autopilot 24/7', sub: 'Tự động cào video mới từ các kênh đánh dấu, tự remake lách bản quyền và đăng 2-4 video/ngày' },
-    'tab-video-factory': { title: 'AI Video Factory', sub: 'Nhập kịch bản, để AI dựng storyboard, sinh ảnh, sinh video từng scene và ghép thành video hoàn chỉnh' }
+    'tab-autopilot': { title: 'Cỗ Máy Tự Động Autopilot 24/7', sub: 'Tự động cào video mới từ các kênh đánh dấu, tự remake lách bản quyền và đăng 2-4 video/ngày' }
   };
 
   tabs.forEach(tab => {
@@ -62,11 +61,6 @@ function setupEventListeners() {
     const video = videoLibrary.find(v => v.id === e.target.value);
     if (video) updateRemakeView(video);
   });
-
-  // AI Video Factory listeners
-  document.getElementById('vfGenerateStoryboardBtn')?.addEventListener('click', vfGenerateStoryboard);
-  document.getElementById('vfApproveBtn')?.addEventListener('click', vfApproveAndGenerateVideos);
-  document.getElementById('vfComposeBtn')?.addEventListener('click', vfComposeFinalVideo);
 }
 
 // 1. Tải danh sách video
@@ -642,127 +636,6 @@ async function handleAddTarget() {
     await loadTargets();
   } catch (e) {
     alert('Lỗi thêm kênh: ' + e.message);
-  }
-}
-
-// 8. AI VIDEO FACTORY MODULE FUNCTIONS
-let vfCurrentProjectId = null;
-
-// Trạng thái project cho phép bấm "Approve & Generate Videos".
-const VF_APPROVABLE_STATUSES = ['images_ready', 'failed'];
-
-async function vfGenerateStoryboard() {
-  const script = document.getElementById('vfScriptInput').value.trim();
-  if (!script) return alert('Vui lòng nhập kịch bản');
-
-  const btn = document.getElementById('vfGenerateStoryboardBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang tạo storyboard...';
-
-  try {
-    const res = await fetch('/api/video-projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script })
-    });
-    const json = await res.json();
-    if (!json.success) return alert(json.error);
-
-    vfCurrentProjectId = json.data.id;
-    document.getElementById('vfProjectView').hidden = false;
-    vfRenderProject(json.data);
-
-    btn.innerText = '⏳ Đang sinh ảnh cho từng scene...';
-    const imgRes = await fetch(`/api/video-projects/${vfCurrentProjectId}/generate-images`, { method: 'POST' });
-    const imgJson = await imgRes.json();
-    if (!imgJson.success) return alert(imgJson.error);
-    vfRenderProject(imgJson.data);
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerText = '🎬 Generate Storyboard';
-  }
-}
-
-// Khi đang render, sửa ảnh scene sẽ ghi đè mất kết quả video đã tốn tiền => khoá nút.
-function vfRenderProject(project) {
-  const isRendering = project.status === 'rendering';
-  const grid = document.getElementById('vfSceneGrid');
-  grid.innerHTML = project.scenes.map((scene) => `
-    <div class="vf-scene-card">
-      <div class="vf-scene-status">${escapeHtml(scene.status)}</div>
-      ${scene.imagePath ? `<img src="/storage/video-factory/${project.id}/${scene.id}_image.png" />` : ''}
-      <p>${escapeHtml(scene.scriptText)}</p>
-      <button class="btn btn-secondary" onclick="vfRegenerateScene('${scene.id}')" ${isRendering ? 'disabled' : ''}>Tạo lại ảnh</button>
-    </div>
-  `).join('');
-
-  document.getElementById('vfCostEstimate').textContent =
-    `Ước tính chi phí Veo: $${project.estimatedVeoCostUsd}`;
-
-  // Chỉ mở cổng duyệt tốn phí Veo khi ảnh storyboard đã sinh xong.
-  // 'failed' cũng được hiện để chạy lại sau lần render lỗi một phần
-  // (backend bỏ qua scene đã video_ready nên không bị tính phí lại).
-  document.getElementById('vfApproveBtn').hidden =
-    !VF_APPROVABLE_STATUSES.includes(project.status);
-
-  if (project.status === 'done' && project.finalVideoPath) {
-    const video = document.getElementById('vfFinalVideo');
-    video.src = `/storage/video-factory/${project.id}/final.mp4`;
-    video.hidden = false;
-  }
-  if (project.scenes.every((s) => s.status === 'video_ready')) {
-    document.getElementById('vfComposeBtn').hidden = false;
-  }
-}
-
-async function vfRegenerateScene(sceneId) {
-  try {
-    const res = await fetch(`/api/video-projects/${vfCurrentProjectId}/scenes/${sceneId}/regenerate-image`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    const json = await res.json();
-    if (!json.success) return alert(json.error);
-    vfRenderProject(json.data);
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  }
-}
-
-async function vfApproveAndGenerateVideos() {
-  const btn = document.getElementById('vfApproveBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang tạo video từng scene (Veo)...';
-  try {
-    const res = await fetch(`/api/video-projects/${vfCurrentProjectId}/approve-and-generate-videos`, { method: 'POST' });
-    const json = await res.json();
-    if (!json.success) return alert(json.error);
-    vfRenderProject(json.data);
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerText = '✅ Approve & Generate Videos';
-  }
-}
-
-async function vfComposeFinalVideo() {
-  const btn = document.getElementById('vfComposeBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang ghép video cuối...';
-  try {
-    const res = await fetch(`/api/video-projects/${vfCurrentProjectId}/compose`, { method: 'POST' });
-    const json = await res.json();
-    if (!json.success) return alert(json.error);
-    vfRenderProject(json.data);
-  } catch (err) {
-    alert('Lỗi: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerText = '🎞️ Compose Final Video';
   }
 }
 
