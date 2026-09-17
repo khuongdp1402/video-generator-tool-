@@ -15,7 +15,7 @@ export interface VideoMeta {
   aspectRatio?: "16:9" | "9:16";
 }
 
-export type SceneType = "headline" | "bullet_points" | "tip" | "outro" | "dialogue" | "story" | "whiteboard" | "media" | "lesson";
+export type SceneType = "headline" | "bullet_points" | "tip" | "outro" | "dialogue" | "story" | "whiteboard" | "media" | "lesson" | "minimalist";
 
 export interface DrawingItem {
   type: string;
@@ -34,6 +34,8 @@ export interface Scene {
   highlightWords?: string[];
   bullets?: string[];
   icon?: string;
+  metaphor?: string;
+  inverted?: boolean;
   characterId?: string;
   expression?: string;
   // Story scene fields

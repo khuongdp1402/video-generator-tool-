@@ -17,6 +17,12 @@ const STYLE_PRESETS = {
       'Mỗi scene mô tả một ý đơn giản, phù hợp video giải thích (explainer), nhân vật ' +
       'và phong cách nét vẽ phải nhất quán xuyên suốt tất cả các scene.',
   },
+  minimalist: {
+    characterStyleBlock:
+      'Minimalist high-contrast 2D explainer animation, visual metaphor, clean geometric white line art on pure black background, Dan Koe style, iconic symbolic illustrations, crisp vector linework, subtle smooth motion, no realistic textures, no 3D rendering.',
+    directorGuidance:
+      'Mỗi scene tập trung vào 1 biểu tượng ẩn dụ thị giác duy nhất (cân, bóng đèn, phễu, bậc thang, chìa khóa). Tương phản cao đen/trắng, tối giản tuyệt đối.',
+  },
 };
 
 const DIMENSIONS_BY_ASPECT_RATIO = {

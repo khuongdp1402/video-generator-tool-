@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const VALID_KINDS = ['story', 'handdrawn'];
+const VALID_KINDS = ['story', 'handdrawn', 'minimalist'];
 
 function createStore(dataFile) {
   function getDb() {
@@ -21,7 +21,7 @@ function createStore(dataFile) {
     fs.writeFileSync(dataFile, JSON.stringify(db, null, 2));
   }
 
-  function createProject({ kind, aspectRatio, rawScript, lessonText = '' }) {
+  function createProject({ kind, aspectRatio, rawScript, lessonText = '', title = '', meta = {}, scenes = [] }) {
     if (!VALID_KINDS.includes(kind)) {
       throw new Error(`Unknown kind: ${kind}`);
     }
@@ -30,16 +30,17 @@ function createStore(dataFile) {
       id: `gp_${Date.now()}`,
       kind,
       aspectRatio,
-      title: '',
+      title: title || '',
       rawScript,
       lessonText,
       meta: {
-        theme: kind === 'handdrawn' ? 'warm-orange' : 'dark-cyan',
+        theme: kind === 'handdrawn' || kind === 'minimalist' ? 'warm-orange' : 'dark-cyan',
         voice: 'vi-VN-NamMinhNeural',
         voiceRate: '+0%',
         bgMusic: '',
+        ...meta,
       },
-      scenes: [],
+      scenes: scenes || [],
       status: 'planning',
       outputPath: null,
       publishing: { tiktok: { posted: false, postedAt: null, url: null } },

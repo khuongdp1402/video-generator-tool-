@@ -14,6 +14,7 @@ import { OutroScene } from "./templates/OutroScene";
 import { DialogueScene } from "./templates/DialogueScene";
 import { StoryScene } from "./templates/StoryScene";
 import { WhiteboardScene } from "./templates/WhiteboardScene";
+import { MinimalistScene } from "./templates/MinimalistScene";
 import { MediaScene } from "./components/MediaScene";
 import { VideoData, ThemeColors, THEMES } from "./types";
 import videoData from "./data/video_data.json";
@@ -104,6 +105,8 @@ function renderScene(scene: VideoData["scenes"][0], themeColors: ThemeColors) {
       return <OutroScene scene={scene} theme={themeColors} />;
     case "media":
       return <MediaScene scene={scene} theme={themeColors} />;
+    case "minimalist":
+      return <MinimalistScene scene={scene} theme={themeColors} />;
     default:
       return <HeadlineScene scene={scene} theme={themeColors} />;
   }
