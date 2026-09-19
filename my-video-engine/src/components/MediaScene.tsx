@@ -9,7 +9,6 @@ import {
   useVideoConfig,
 } from "remotion";
 import { Scene, ThemeColors } from "../types";
-import { Subtitle } from "./Subtitle";
 
 interface MediaSceneProps {
   scene: Scene;
@@ -86,22 +85,6 @@ export const MediaScene: React.FC<MediaSceneProps> = ({ scene, theme }) => {
           </AbsoluteFill>
         )}
 
-        {/* Darken bottom for subtitle legibility */}
-        <AbsoluteFill
-          style={{
-            background:
-              "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 35%)",
-          }}
-        />
-      </AbsoluteFill>
-
-      <AbsoluteFill
-        style={{
-          justifyContent: "flex-end",
-          paddingBottom: 50,
-        }}
-      >
-        <Subtitle text={scene.text} highlightWords={scene.highlightWords} theme={theme} />
       </AbsoluteFill>
 
       {/* Scene narration audio */}

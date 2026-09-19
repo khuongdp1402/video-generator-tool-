@@ -1,110 +1,58 @@
 {
   "meta": {
-    "title": "Nghệ Thuật Buông Bỏ",
-    "theme": "dark-purple",
+    "title": "Tiền và Tri Thức - Bài học 2 người trẻ (Gemini Ultra Veo 2D)",
+    "theme": "warm-orange",
     "bgMusic": "tech-ambient.mp3",
     "musicVolume": 0.08,
     "voice": "vi-VN-NamMinhNeural",
-    "voiceRate": "-5%"
+    "voiceRate": "+0%",
+    "aspectRatio": "9:16"
   },
   "scenes": [
     {
       "id": 1,
       "type": "media",
-      "text": "Bạn có bao giờ tự hỏi, vì sao ta càng cố giữ chặt một điều, nó lại càng rời xa ta hơn?",
+      "text": "Một ông lão thông thái trao cho hai người trẻ một cơ hội: Người thứ nhất chọn ôm trọn chiếc rương đầy vàng, người thứ hai khiêm tốn nhận cuốn sách tri thức.",
+      "mediaFile": "media/tk_scene_1.mp4",
+      "mediaStatus": "video",
       "audioFile": "audio/scene_1.mp3",
-      "durationInFrames": 202,
-      "highlightWords": [
-        "giữ chặt",
-        "rời xa"
-      ],
-      "imagePrompt": "Extreme close-up of two cupped hands trying to hold water that slips through the fingers, golden hour backlight, cinematic, shallow depth of field, moody warm tones, philosophical short-film aesthetic, vertical 9:16 composition",
-      "videoPrompt": "Water slowly drips and slips through the fingers in slow motion as the hands tighten, golden light shimmering on the falling droplets",
-      "mediaStatus": "pending"
+      "durationInFrames": 271
     },
     {
       "id": 2,
       "type": "media",
-      "text": "Cuốn sách Kỹ Năng Buông Bỏ bắt đầu bằng một sự thật giản dị: mọi đau khổ của con người đều bắt nguồn từ sự bám víu.",
+      "text": "Người chọn vàng thỏa sức tiêu xài hoang phí. Nhưng không có tri thức, vàng vơi dần, đến khi dốc ngược rương chỉ còn hư vô và bụi bay ra, anh ta ngã quỵ tuyệt vọng.",
+      "mediaFile": "media/tk_scene_2.mp4",
+      "mediaStatus": "video",
       "audioFile": "audio/scene_2.mp3",
-      "durationInFrames": 230,
-      "highlightWords": [
-        "đau khổ",
-        "bám víu"
-      ],
-      "imagePrompt": "A person sitting alone by a rain-streaked window at dusk, holding an old photograph tightly to their chest, muted blue-purple cinematic tones, moody melancholic lighting, vertical 9:16 composition",
-      "videoPrompt": "Slow zoom in on the hands gripping the photograph, rain droplets trailing down the window glass in the background",
-      "mediaStatus": "pending"
+      "durationInFrames": 334
     },
     {
       "id": 3,
       "type": "media",
-      "text": "Ta bám vào quá khứ đã qua, bám vào những người đã rời đi, bám vào cả những phiên bản cũ của chính mình.",
+      "text": "Trong khi đó, người chọn tri thức miệt mài đọc cuốn sách dày thâu đêm, đôi mắt sáng ngời tiếp thu những bài học vô giá của tiền nhân.",
+      "mediaFile": "media/tk_scene_3.mp4",
+      "mediaStatus": "video",
       "audioFile": "audio/scene_3.mp3",
-      "durationInFrames": 225,
-      "highlightWords": [
-        "quá khứ",
-        "rời đi"
-      ],
-      "imagePrompt": "A lone figure standing in an empty autumn forest surrounded by falling leaves, looking back at a faded silhouette walking away into mist, desaturated warm autumn tones, cinematic wide shot, vertical 9:16",
-      "videoPrompt": "Leaves fall slowly around the figure while the faded silhouette in the background dissolves further into the mist",
-      "mediaStatus": "pending"
+      "durationInFrames": 243
     },
     {
       "id": 4,
       "type": "media",
-      "text": "Nhưng buông bỏ không có nghĩa là từ bỏ. Nó là học cách mở bàn tay, để những gì không thuộc về mình được tự do bay đi.",
+      "text": "Từ kiến thức tích lũy, chàng trai say mê phác thảo từng bản vẽ kỹ thuật, biến tri thức trừu tượng thành những giá trị sáng tạo hữu ích cho đời.",
+      "mediaFile": "media/tk_scene_4.mp4",
+      "mediaStatus": "video",
       "audioFile": "audio/scene_4.mp3",
-      "durationInFrames": 272,
-      "highlightWords": [
-        "buông bỏ",
-        "tự do"
-      ],
-      "imagePrompt": "Close-up of an open palm releasing a small flock of white paper birds into a soft morning sky, minimalist, gentle backlight, pastel colors, cinematic, vertical 9:16 composition",
-      "videoPrompt": "The paper birds lift off the palm one by one and fly away into the soft light, slow motion",
-      "mediaStatus": "pending"
+      "durationInFrames": 255
     },
     {
       "id": 5,
       "type": "media",
-      "text": "Giống như nắm cát trong tay, càng siết chặt, cát càng chảy nhanh qua kẽ tay. Chỉ khi ta thả lỏng, cát mới chịu ở lại.",
+      "text": "Đứng trước ánh bình minh tương lai tươi sáng, anh mỉm cười hạnh phúc. Tiền bạc mất đi có thể tìm lại, nhưng tri thức là kho báu vĩnh cửu không ai có thể cướp mất!",
+      "mediaFile": "media/tk_scene_5.mp4",
+      "mediaStatus": "video",
       "audioFile": "audio/scene_5.mp3",
-      "durationInFrames": 284,
-      "highlightWords": [
-        "siết chặt",
-        "thả lỏng"
-      ],
-      "imagePrompt": "Extreme macro shot of fine white sand pouring through an open fist against a dark background, dramatic side lighting, high contrast, cinematic, vertical 9:16 composition",
-      "videoPrompt": "Sand streams slowly through the fingers in slow motion catching the light, the fist gradually relaxing open",
-      "mediaStatus": "pending"
-    },
-    {
-      "id": 6,
-      "type": "media",
-      "text": "Khi ta ngừng gồng mình giữ lấy mọi thứ, một sự bình yên lạ lùng xuất hiện, thứ bình yên chỉ có được khi ta thật sự tự do.",
-      "audioFile": "audio/scene_6.mp3",
-      "durationInFrames": 247,
-      "highlightWords": [
-        "bình yên",
-        "tự do"
-      ],
-      "imagePrompt": "Wide shot of a person standing at the edge of a calm still lake at sunrise, arms relaxed, mist rising off the water, serene symmetrical composition, soft golden light, cinematic, vertical 9:16",
-      "videoPrompt": "Gentle mist drifts across the still lake surface as the person breathes slowly, birds fly across the horizon",
-      "mediaStatus": "pending"
-    },
-    {
-      "id": 7,
-      "type": "media",
-      "text": "Nếu bạn cũng đang cố buông bỏ điều gì đó, hãy nhớ: bàn tay chỉ thực sự nhận được điều mới, khi nó chịu mở ra. Theo dõi để cùng khám phá thêm những cuốn sách thay đổi cách bạn sống.",
-      "audioFile": "audio/scene_7.mp3",
-      "durationInFrames": 387,
-      "highlightWords": [
-        "buông bỏ",
-        "mở ra"
-      ],
-      "imagePrompt": "A hand opening fully toward a bright sunrise, silhouette against a warm golden sky, hopeful and uplifting mood, minimalist cinematic wide shot, vertical 9:16 composition",
-      "videoPrompt": "The silhouette hand opens fully as warm sunlight flares gently across the frame, uplifting slow motion",
-      "mediaStatus": "pending"
+      "durationInFrames": 317
     }
   ]
 }

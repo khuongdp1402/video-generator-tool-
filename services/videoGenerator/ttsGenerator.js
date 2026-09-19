@@ -22,12 +22,22 @@ async function generateSceneAudio(scene, voice, rate, audioDir) {
   const audioFileName = `scene_${scene.id}.mp3`;
   const audioPath = path.join(audioDir, audioFileName);
 
-  const tts = new EdgeTTS();
-  await tts.synthesize(text, voice, {
-    rate: rate || '+0%',
-    outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
-  });
-  const buffer = tts.toBuffer();
+  let buffer = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const tts = new EdgeTTS();
+      await tts.synthesize(text, voice, {
+        rate: rate || '+0%',
+        outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+      });
+      buffer = tts.toBuffer();
+      if (buffer && buffer.length > 0) break;
+    } catch (e) {
+      if (attempt === 4) throw e;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+
   if (!buffer || buffer.length === 0) {
     throw new Error(`Empty audio buffer for scene ${scene.id}`);
   }
