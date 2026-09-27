@@ -128,21 +128,38 @@ server.registerTool(
     },
   },
   async ({ title, voice, voiceRate, scenes }) => {
+    let existingScenesById = new Map();
+    try {
+      const prior = await readScenario();
+      existingScenesById = new Map(prior.scenes.map((s) => [s.id, s]));
+    } catch {
+      // No prior scenario on disk yet — every scene is new, nothing to carry forward.
+    }
+
     const data = {
       meta: {
         title,
         ...(voice ? { voice } : {}),
         ...(voiceRate ? { voiceRate } : {}),
       },
-      scenes: scenes.map((s) => ({
-        id: s.id,
-        text: s.text,
-        audioFile: "",
-        durationInFrames: estimateDurationFrames(s.text),
-        ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
-        imagePrompt: s.imagePrompt,
-        mediaStatus: "pending",
-      })),
+      scenes: scenes.map((s) => {
+        const existing = existingScenesById.get(s.id);
+        const textUnchanged = existing && existing.text === s.text;
+        return {
+          id: s.id,
+          text: s.text,
+          // Only carry forward audio/media from a prior save if this scene's
+          // text is unchanged — otherwise stale narration would no longer
+          // match what's on screen. New/edited scenes always start blank.
+          audioFile: textUnchanged ? existing.audioFile || "" : "",
+          durationInFrames: textUnchanged ? existing.durationInFrames : estimateDurationFrames(s.text),
+          ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
+          imagePrompt: s.imagePrompt,
+          ...(textUnchanged && existing.wordTimestamps ? { wordTimestamps: existing.wordTimestamps } : {}),
+          mediaStatus: textUnchanged && existing.mediaStatus ? existing.mediaStatus : "pending",
+          ...(textUnchanged && existing.mediaFile ? { mediaFile: existing.mediaFile } : {}),
+        };
+      }),
     };
     await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
     await writeScenario(data);

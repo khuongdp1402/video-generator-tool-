@@ -15,6 +15,16 @@ __pycache__/
 my-video-engine/client_secrets.json
 my-video-engine/token.json
 
+# Embedded Python runtime (edge_tts + mutagen for TTS)
+python/
+
+# Persistent Chrome profile used by the Gemini automation scripts (contains login session)
+.chrome_profile/
+
+# Douyin reup runtime state (per-machine, not source)
+storage/
+tiktok_browser_profile/
+
 # Logs
 my-video-engine/logs/
 
