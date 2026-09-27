@@ -1,0 +1,43 @@
+# Non-secret configuration. Secrets (API keys, OAuth client paths) live in .env — see .env.example.
+
+fps: 30
+resolution:
+  width: 1080
+  height: 1920
+
+tts:
+  voice: "vi-VN-NamMinhNeural"
+  rate: "-5%"
+  padding_seconds: 0.5
+
+whisper:
+  model: "base"
+
+ai:
+  model: "gemini-1.5-pro"
+  num_scenes: 7
+  min_score: 85
+  max_attempts: 3
+
+render:
+  crossfade_seconds: 0.5
+  kenburns_end_scale: 1.1
+  subtitle:
+    font_family: "Be Vietnam Pro, Montserrat, sans-serif"
+    font_size_px: 64
+    stroke_px: 6
+    highlight_color: "#FFD400"
+
+paths:
+  data_file: "src/data/video_data.json"
+  audio_dir: "public/audio"
+  media_dir: "public/media"
+  output_dir: "output"
+  logs_dir: "logs"
+
+youtube:
+  privacy_status: "private" # private | unlisted | public
+  category_id: "22"
+
+tiktok:
+  privacy_level: "SELF_ONLY" # SELF_ONLY | PUBLIC_TO_EVERYONE | MUTUAL_FOLLOW_FRIENDS

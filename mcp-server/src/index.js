@@ -2,13 +2,11 @@
 /**
  * MCP server for my-video-engine.
  *
- * Exposes the "script -> scenario -> voiceover -> media import -> render"
- * pipeline as tools so a coding agent (Gemini CLI, Claude Code, ...) can
- * drive video production end to end. The agent itself is expected to do the
- * creative writing (breaking a script into scenes, writing image/video
- * prompts) — these tools only handle the deterministic, local-filesystem
- * and subprocess parts: persisting the scenario, running TTS, importing
- * media files the user generated in Gemini Ultra chat, and rendering.
+ * Exposes the "topic/script -> scenario -> voiceover -> media import -> render"
+ * pipeline as tools so a coding agent (Antigravity, Gemini CLI, Claude Code, ...)
+ * can drive video production end to end. The Python engine (config_manager.py,
+ * ai_generator.py, media_engine.py, render_engine.py, uploader.py) does the
+ * actual work; these tools just shell out to it and manage video_data.json.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -16,6 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +27,17 @@ const DATA_FILE = path.join(ENGINE_ROOT, "src", "data", "video_data.json");
 const MEDIA_DIR = path.join(ENGINE_ROOT, "public", "media");
 const AUDIO_DIR = path.join(ENGINE_ROOT, "public", "audio");
 const OUTPUT_DIR = path.join(ENGINE_ROOT, "output");
+
+// Agents (Antigravity, Gemini CLI, Claude Code) spawn this process directly —
+// they never `source .venv/bin/activate` first — so default to the engine's
+// own venv interpreter instead of whatever "python3" resolves to on PATH.
+function resolvePython() {
+  if (process.env.VIDEO_ENGINE_PYTHON) return process.env.VIDEO_ENGINE_PYTHON;
+  const venvPython = path.join(ENGINE_ROOT, ".venv", "bin", "python3");
+  return fsSync.existsSync(venvPython) ? venvPython : "python3";
+}
+
+const PYTHON = resolvePython();
 
 const FPS = 30;
 const PADDING_FRAMES = 15;
@@ -56,80 +66,81 @@ function errorResult(message) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+async function runPython(args, { maxBuffer = 20 * 1024 * 1024 } = {}) {
+  return execFileAsync(PYTHON, args, { cwd: ENGINE_ROOT, maxBuffer });
+}
+
 const server = new McpServer({
   name: "video-engine-mcp",
-  version: "1.0.0",
+  version: "2.0.0",
 });
 
 const sceneInputSchema = z.object({
   id: z.number().int().positive(),
-  type: z
-    .enum([
-      "media",
-      "headline",
-      "bullet_points",
-      "tip",
-      "outro",
-      "dialogue",
-      "story",
-      "whiteboard",
-    ])
-    .default("media"),
   text: z.string().min(1),
   highlightWords: z.array(z.string()).optional(),
   imagePrompt: z
     .string()
-    .optional()
     .describe(
-      "Detailed prompt for the still image to generate for this scene (subject, style, framing, lighting).",
-    ),
-  videoPrompt: z
-    .string()
-    .optional()
-    .describe(
-      "Prompt describing how the still image should animate into a short video clip (camera move, motion in the scene).",
+      "Detailed prompt for the STILL image to generate for this scene (subject, style, framing, lighting). " +
+        "No motion/video description — Ken Burns zoom is added automatically by render_video.",
     ),
 });
+
+server.registerTool(
+  "generate_scenario_from_topic",
+  {
+    title: "Generate scenario from a topic (AI Brain)",
+    description:
+      "Runs the Gemini-based AI Brain (ai_generator.py) with its auto-scoring loop (Hook/Pacing/Loopability, " +
+      "regenerates until score >= threshold) to turn a raw topic/idea into a full scene breakdown, and writes " +
+      "it straight into video_data.json. Requires GEMINI_API_KEY in my-video-engine/.env. Use this instead of " +
+      "save_scenario when you want the Python AI Brain to write the script; use save_scenario when you (the " +
+      "calling agent) already wrote the scenes yourself.",
+    inputSchema: {
+      topic: z.string().min(1),
+    },
+  },
+  async ({ topic }) => {
+    try {
+      const { stdout, stderr } = await runPython(["main.py", "script", topic]);
+      const data = await readScenario();
+      return textResult({ ok: true, scenesWritten: data.scenes.length, stdout, stderr });
+    } catch (err) {
+      return errorResult(`Scenario generation failed: ${err.message}\n${err.stderr ?? ""}`);
+    }
+  },
+);
 
 server.registerTool(
   "save_scenario",
   {
     title: "Save video scenario",
     description:
-      "Write the full scene breakdown (already produced by you from the raw script) into video_data.json. " +
-      "Call this once you have split the script into scenes and written an imagePrompt/videoPrompt for each. " +
-      "Duration is estimated from word count and will be corrected by generate_all_voiceovers once real audio exists.",
+      "Write a scene breakdown you (the calling agent) already produced from a raw script into video_data.json. " +
+      "Each scene needs an imagePrompt (still image only, no motion — Ken Burns zoom is added in render). " +
+      "Duration is estimated from word count and corrected by generate_all_voiceovers once real audio exists.",
     inputSchema: {
       title: z.string(),
-      theme: z
-        .enum(["dark-cyan", "dark-purple", "warm-orange", "neon-green"])
-        .default("dark-cyan"),
-      bgMusic: z.string().default(""),
-      musicVolume: z.number().min(0).max(1).default(0.1),
       voice: z.string().optional(),
       voiceRate: z.string().optional(),
       scenes: z.array(sceneInputSchema).min(1),
     },
   },
-  async ({ title, theme, bgMusic, musicVolume, voice, voiceRate, scenes }) => {
+  async ({ title, voice, voiceRate, scenes }) => {
     const data = {
       meta: {
         title,
-        theme,
-        bgMusic,
-        musicVolume,
         ...(voice ? { voice } : {}),
         ...(voiceRate ? { voiceRate } : {}),
       },
       scenes: scenes.map((s) => ({
         id: s.id,
-        type: s.type,
         text: s.text,
         audioFile: "",
         durationInFrames: estimateDurationFrames(s.text),
         ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
-        ...(s.imagePrompt ? { imagePrompt: s.imagePrompt } : {}),
-        ...(s.videoPrompt ? { videoPrompt: s.videoPrompt } : {}),
+        imagePrompt: s.imagePrompt,
         mediaStatus: "pending",
       })),
     };
@@ -149,22 +160,21 @@ server.registerTool(
   {
     title: "Get scenario status",
     description:
-      "Read video_data.json and report, per scene, whether audio and media exist yet, plus the image/video " +
-      "prompts to hand to the user for generation in Gemini Ultra chat (Nano Banana / Veo).",
+      "Read video_data.json and report, per scene, whether audio/word-alignment and media exist yet, plus the " +
+      "image prompt to hand to the user for generation in Gemini Ultra chat (Nano Banana).",
     inputSchema: {},
   },
   async () => {
     const data = await readScenario();
     const scenes = data.scenes.map((s) => ({
       id: s.id,
-      type: s.type,
       text: s.text,
       hasAudio: Boolean(s.audioFile),
+      hasWordTimestamps: Boolean(s.wordTimestamps),
       durationInFrames: s.durationInFrames,
-      mediaStatus: s.mediaStatus ?? (s.type === "media" ? "pending" : "n/a"),
+      mediaStatus: s.mediaStatus ?? "pending",
       mediaFile: s.mediaFile ?? null,
       imagePrompt: s.imagePrompt ?? null,
-      videoPrompt: s.videoPrompt ?? null,
     }));
     return textResult({ meta: data.meta, scenes });
   },
@@ -173,25 +183,19 @@ server.registerTool(
 server.registerTool(
   "generate_all_voiceovers",
   {
-    title: "Generate voiceovers",
+    title: "Generate voiceovers + word alignment",
     description:
-      "Run the TTS pipeline (scripts/tts_generator.py, edge-tts) over every scene in video_data.json. " +
-      "Fills audioFile and corrects durationInFrames from real speech length. Requires python3 with edge-tts " +
-      "and mutagen installed.",
+      "Runs media_engine.py: TTS (edge-tts) per scene, then local Whisper alignment for word-level timestamps " +
+      "(more reliable than edge-tts's own WordBoundary events). Fills audioFile, wordTimestamps and corrects " +
+      "durationInFrames from real speech length.",
     inputSchema: {},
   },
   async () => {
     try {
-      const { stdout, stderr } = await execFileAsync(
-        "python3",
-        ["scripts/tts_generator.py"],
-        { cwd: ENGINE_ROOT, maxBuffer: 20 * 1024 * 1024 },
-      );
+      const { stdout, stderr } = await runPython(["media_engine.py"], { maxBuffer: 20 * 1024 * 1024 });
       return textResult({ ok: true, stdout, stderr });
     } catch (err) {
-      return errorResult(
-        `TTS generation failed: ${err.message}\n${err.stdout ?? ""}\n${err.stderr ?? ""}`,
-      );
+      return errorResult(`Voiceover generation failed: ${err.message}\n${err.stderr ?? ""}`);
     }
   },
 );
@@ -199,19 +203,16 @@ server.registerTool(
 server.registerTool(
   "import_media",
   {
-    title: "Import generated media for a scene",
+    title: "Import a generated image for a scene",
     description:
-      "Copy a locally saved image or video (downloaded from Gemini Ultra chat after generating it from the " +
-      "scene's imagePrompt/videoPrompt) into the project and mark that scene's mediaStatus in video_data.json.",
+      "Copy a locally saved image (downloaded from Gemini Ultra chat after generating it from the scene's " +
+      "imagePrompt) into the project and mark that scene's mediaStatus in video_data.json.",
     inputSchema: {
       sceneId: z.number().int().positive(),
-      sourcePath: z
-        .string()
-        .describe("Absolute path to the image/video file on disk, e.g. a downloaded file."),
-      mediaType: z.enum(["image", "video"]),
+      sourcePath: z.string().describe("Absolute path to the image file on disk, e.g. a downloaded file."),
     },
   },
-  async ({ sceneId, sourcePath, mediaType }) => {
+  async ({ sceneId, sourcePath }) => {
     const resolvedSource = path.resolve(sourcePath);
     try {
       await fs.access(resolvedSource);
@@ -225,25 +226,19 @@ server.registerTool(
       return errorResult(`No scene with id ${sceneId} in video_data.json`);
     }
 
-    const ext = path.extname(resolvedSource) || (mediaType === "video" ? ".mp4" : ".png");
+    const ext = path.extname(resolvedSource) || ".png";
     const destName = `scene_${sceneId}${ext}`;
     const destPath = path.join(MEDIA_DIR, destName);
 
     await fs.mkdir(MEDIA_DIR, { recursive: true });
     await fs.copyFile(resolvedSource, destPath);
 
-    scene.type = "media";
-    scene.mediaStatus = mediaType;
-    scene.mediaFile = `media/${destName}`;
+    scene.mediaStatus = "image";
+    scene.mediaFile = `public/media/${destName}`;
 
     await writeScenario(data);
 
-    return textResult({
-      ok: true,
-      sceneId,
-      mediaStatus: scene.mediaStatus,
-      mediaFile: scene.mediaFile,
-    });
+    return textResult({ ok: true, sceneId, mediaStatus: scene.mediaStatus, mediaFile: scene.mediaFile });
   },
 );
 
@@ -252,8 +247,10 @@ server.registerTool(
   {
     title: "Render final video",
     description:
-      "Run `remotion render` to composite all scenes (audio + media + subtitles) into output/final.mp4. " +
-      "Call this after voiceovers are generated and every scene's media has been imported.",
+      "Runs render_engine.py: composites every scene (static image + CSS Ken Burns zoom + word-synced karaoke " +
+      "subtitles, captured via Playwright, encoded with FFmpeg) and crossfades them into output/final.mp4. Any " +
+      "scene without imported media renders with a placeholder image instead of failing. Call after voiceovers " +
+      "are generated.",
     inputSchema: {
       outputFile: z.string().default("output/final.mp4"),
     },
@@ -261,11 +258,9 @@ server.registerTool(
   async ({ outputFile }) => {
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
     try {
-      const { stdout, stderr } = await execFileAsync(
-        "npx",
-        ["remotion", "render", "src/index.ts", "VideoComposition", outputFile],
-        { cwd: ENGINE_ROOT, maxBuffer: 50 * 1024 * 1024 },
-      );
+      const { stdout, stderr } = await runPython(["render_engine.py", "--output", outputFile], {
+        maxBuffer: 50 * 1024 * 1024,
+      });
       const absOutput = path.resolve(ENGINE_ROOT, outputFile);
       const stat = await fs.stat(absOutput).catch(() => null);
       return textResult({
@@ -276,9 +271,34 @@ server.registerTool(
         stderr,
       });
     } catch (err) {
-      return errorResult(
-        `Render failed: ${err.message}\n${err.stdout ?? ""}\n${err.stderr ?? ""}`,
-      );
+      return errorResult(`Render failed: ${err.message}\n${err.stderr ?? ""}`);
+    }
+  },
+);
+
+server.registerTool(
+  "upload_video",
+  {
+    title: "Upload video via an official platform API",
+    description:
+      "Runs uploader.py to publish a rendered video through YouTube's Data API v3 (OAuth, your own app) or " +
+      "TikTok's Content Posting API (requires an approved developer app + TIKTOK_ACCESS_TOKEN). Does not use " +
+      "anti-detect browsers or any bot-detection-evasion technique.",
+    inputSchema: {
+      platform: z.enum(["youtube", "tiktok"]),
+      videoPath: z.string(),
+      title: z.string(),
+      description: z.string().optional(),
+    },
+  },
+  async ({ platform, videoPath, title, description }) => {
+    const args = ["main.py", "upload", platform, videoPath, "--title", title];
+    if (description) args.push("--description", description);
+    try {
+      const { stdout, stderr } = await runPython(args);
+      return textResult({ ok: true, stdout, stderr });
+    } catch (err) {
+      return errorResult(`Upload failed: ${err.message}\n${err.stderr ?? ""}`);
     }
   },
 );

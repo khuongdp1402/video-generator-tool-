@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: ${WIDTH}px;
+    height: ${HEIGHT}px;
+    overflow: hidden;
+    background: #05030a;
+    font-family: ${FONT_FAMILY};
+  }
+  .frame { position: relative; width: 100%; height: 100%; }
+  .bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform-origin: center center;
+    will-change: transform;
+  }
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 40%);
+  }
+  .subtitle {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 140px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px 14px;
+    padding: 0 50px;
+    line-height: 1.5;
+  }
+  .word {
+    font-size: ${FONT_SIZE_PX}px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.4);
+    -webkit-text-stroke: ${STROKE_PX}px black;
+    paint-order: stroke fill;
+    transition: none;
+  }
+  .word.past { color: #ffffff; }
+  .word.active { color: #ffffff; }
+  .word.active.highlight { color: ${HIGHLIGHT_COLOR}; }
+  .word.past.highlight { color: ${HIGHLIGHT_COLOR}; }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <img class="bg" id="bg" src="${IMAGE_DATA_URI}" />
+    <div class="scrim"></div>
+    <div class="subtitle" id="subtitle"></div>
+  </div>
+
+<script>
+  const DURATION = ${DURATION_SECONDS};
+  const END_SCALE = ${END_SCALE};
+  const WORDS = ${WORDS_JSON};
+  const HIGHLIGHT = new Set(${HIGHLIGHT_WORDS_JSON}.map(w => w.toLowerCase()));
+
+  const bg = document.getElementById("bg");
+  const subtitleEl = document.getElementById("subtitle");
+
+  subtitleEl.innerHTML = WORDS.map((w, i) =>
+    `<span class="word" data-i="${i}">${w.word}</span>`
+  ).join(" ");
+  const spans = subtitleEl.querySelectorAll(".word");
+
+  function normalize(w) {
+    return w.toLowerCase().replace(/[.,!?;:"']/g, "");
+  }
+
+  window.setFrame = function (t) {
+    const progress = Math.min(1, Math.max(0, t / DURATION));
+    const scale = 1 + (END_SCALE - 1) * progress;
+    bg.style.transform = `scale(${scale})`;
+
+    WORDS.forEach((w, i) => {
+      const span = spans[i];
+      const isHighlight = HIGHLIGHT.has(normalize(w.word));
+      span.classList.toggle("highlight", isHighlight);
+      if (t >= w.end) {
+        span.classList.add("past");
+        span.classList.remove("active");
+      } else if (t >= w.start) {
+        span.classList.add("active");
+        span.classList.remove("past");
+      } else {
+        span.classList.remove("active", "past");
+      }
+    });
+  };
+
+  window.setFrame(0);
+</script>
+</body>
+</html>
