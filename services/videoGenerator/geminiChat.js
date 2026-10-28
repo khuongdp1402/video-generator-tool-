@@ -6,25 +6,28 @@ const { spawn } = require('child_process');
 const DEFAULT_CDP_URL = 'http://localhost:9222';
 const GEMINI_URL = 'https://gemini.google.com/app';
 
-async function ensureChromeCdpRunning(startUrl = GEMINI_URL) {
+async function ensureChromeCdpRunning(startUrl = GEMINI_URL, headless = true) {
   const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   if (!fs.existsSync(chromePath)) return false;
   const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-  const child = spawn(
-    chromePath,
-    [
-      '--remote-debugging-port=9222',
-      `--user-data-dir=${profileDir}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-      startUrl,
-    ],
-    { detached: true, stdio: 'ignore' }
-  );
+  const args = [
+    '--remote-debugging-port=9222',
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--mute-audio',
+    '--window-size=1440,900',
+  ];
+  if (headless !== false) {
+    args.unshift('--headless=new');
+  }
+  args.push(startUrl);
+
+  const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
   child.unref();
-  await new Promise((r) => setTimeout(r, 2500));
+  await new Promise((r) => setTimeout(r, 2800));
   return true;
 }
 

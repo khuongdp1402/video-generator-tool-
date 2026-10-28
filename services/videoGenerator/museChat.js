@@ -9,6 +9,10 @@ const DEFAULT_CDP_URL = process.env.MUSE_CDP_URL || 'http://localhost:9222';
 const DEFAULT_MUSE_URL = process.env.MUSE_URL || 'https://muse.ai';
 
 const PROMPT_INPUT_SELECTORS = [
+  '[data-hatch-composer-chrome="true"] textarea',
+  'textarea[data-hatch-composer-prehydration-input="true"]',
+  'textarea[placeholder*="Nhắn tin" i]',
+  'textarea[aria-label*="Nhắn tin" i]',
   'textarea[placeholder*="prompt" i]',
   'textarea[placeholder*="describe" i]',
   'textarea[placeholder*="script" i]',
@@ -22,17 +26,18 @@ const PROMPT_INPUT_SELECTORS = [
   '[role="textbox"]',
 ].join(', ');
 
+// Chỉ chọn đúng nút Gửi/Send nằm trong thanh nhập lệnh (composer), tuyệt đối không chọn
+// button:has-text("Create") hay button[type="submit"] vì sẽ bấm nhầm vào thẻ lịch sử chat ở phía trên.
 const SUBMIT_BUTTON_SELECTORS = [
-  'button[type="submit"]:not([disabled])',
-  'button[aria-label*="send" i]:not([disabled])',
-  'button[aria-label*="generate" i]:not([disabled])',
-  'button:has-text("Generate"):not([disabled])',
-  'button:has-text("Create"):not([disabled])',
-  'button:has-text("Tạo"):not([disabled])',
-  'button:has-text("Send"):not([disabled])',
+  '[data-hatch-composer-chrome="true"] button[aria-label="Gửi"]:not([disabled])',
+  '[data-hatch-composer-chrome="true"] button[aria-label="Send"]:not([disabled])',
+  'button[aria-label="Gửi"]:not([disabled])',
+  'button[aria-label="Send"]:not([disabled])',
 ].join(', ');
 
 const REPLY_SELECTORS = [
+  '[data-message-role="assistant"]',
+  '[data-message-side="agent"]',
   '[data-message-author-role="assistant"]',
   '.assistant-message',
   '.ai-message',
@@ -44,6 +49,32 @@ const REPLY_SELECTORS = [
   '.prose',
 ].join(', ');
 
+async function launchHiddenChromeMuseProfile(targetUrl = DEFAULT_MUSE_URL, headless = true) {
+  const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (!fs.existsSync(chromePath)) return false;
+  const { spawn } = require('child_process');
+  const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
+  if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+  const args = [
+    '--remote-debugging-port=9222',
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--mute-audio',
+    '--window-size=1440,900',
+  ];
+  if (headless !== false) {
+    args.unshift('--headless=new');
+  }
+  args.push(targetUrl);
+
+  const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
+  child.unref();
+  await new Promise((r) => setTimeout(r, 2800));
+  return true;
+}
+
 async function connectToMusePage(opts = {}) {
   const cdpUrl = opts.cdpUrl || DEFAULT_CDP_URL;
   const targetUrl = opts.museUrl || DEFAULT_MUSE_URL;
@@ -51,41 +82,24 @@ async function connectToMusePage(opts = {}) {
 
   let browser;
   try {
-    browser = await chromium.connectOverCDP(cdpUrl);
+    browser = await chromium.connectOverCDP(cdpUrl, { timeout: 3000 });
   } catch (err) {
     if (opts.autoLaunch !== false && String(err.message || '').includes('ECONNREFUSED')) {
-      const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-      if (fs.existsSync(chromePath)) {
-        const { spawn } = require('child_process');
-        const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
-        if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
-        const child = spawn(
-          chromePath,
-          [
-            '--remote-debugging-port=9222',
-            `--user-data-dir=${profileDir}`,
-            '--no-first-run',
-            '--no-default-browser-check',
-            targetUrl,
-          ],
-          { detached: true, stdio: 'ignore' }
-        );
-        child.unref();
-        await new Promise((r) => setTimeout(r, 2600));
+      const launched = await launchHiddenChromeMuseProfile(targetUrl, opts.headless !== false);
+      if (launched) {
         browser = await chromium.connectOverCDP(cdpUrl, { timeout: 6000 });
       }
     }
     if (!browser) {
       throw new Error(
-        `Không kết nối được Chrome qua cổng Debug (${cdpUrl}). ` +
-          `Hệ thống đã thử tự mở Chrome AI Profile nhưng chưa sẵn sàng. Hãy đăng nhập sẵn tài khoản trên cửa sổ Chrome vừa mở (${targetUrl}). Chi tiết: ${err.message}`
+        `Không kết nối được Chrome qua cổng Debug (${cdpUrl}). Chi tiết: ${err.message}`
       );
     }
   }
 
   const context = browser.contexts()[0];
   if (!context) {
-    throw new Error('Không tìm thấy Chrome context nào. Hãy mở Chrome với --remote-debugging-port=9222.');
+    throw new Error('Không tìm thấy Chrome context nào trên cổng 9222.');
   }
 
   let hostKey = 'muse';
@@ -103,29 +117,97 @@ async function connectToMusePage(opts = {}) {
   if (!page) {
     page = await context.newPage();
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  } else if (page.url().includes('/library/') && !opts.keepLibraryPage) {
+    await page.goto('https://muse.ai/', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
   }
 
   return { browser, page };
 }
 
+async function dismissMuseDialogs(page) {
+  if (typeof page.keyboard?.press === 'function') {
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+  if (typeof page.evaluate === 'function') {
+    await page
+      .evaluate(() => {
+        const dialogs = Array.from(
+          document.querySelectorAll('[role="dialog"][data-state="open"], [data-slot="dialog-content"][data-state="open"]')
+        );
+        for (const d of dialogs) {
+          const closeBtn = d.querySelector(
+            'button[aria-label="Đóng"], button[aria-label="Close"], [data-slot="dialog-close"]'
+          );
+          if (closeBtn) closeBtn.click();
+        }
+      })
+      .catch(() => {});
+  }
+}
+
 async function submitPromptOnMuse(page, promptText) {
+  // Đóng bất kỳ modal/popup thư viện nào đang mở đè lên khung chat
+  await dismissMuseDialogs(page);
+
   const input = page.locator(PROMPT_INPUT_SELECTORS).first();
   await input.waitFor({ state: 'visible', timeout: 20000 });
-  await input.click();
+  await input.click({ force: true });
   await input.fill(promptText);
+
+  if (typeof page.waitForTimeout === 'function') {
+    await page.waitForTimeout(250);
+  }
 
   const submitBtn = page.locator(SUBMIT_BUTTON_SELECTORS).first();
   if ((await submitBtn.count()) > 0 && (await submitBtn.isVisible().catch(() => false))) {
-    await submitBtn.click();
+    await submitBtn.click({ force: true });
   } else {
     await input.press('Enter');
   }
 }
 
-async function sendMusePromptAndWaitForReply(page, promptText, opts = {}) {
-  const { timeoutMs = 180000, pollMs = 2000, stableChecks = 2 } = opts;
+function cleanMuseReplyText(raw) {
+  return String(raw || '')
+    .replace(/^Tin nhắn của Assistant:\s*/i, '')
+    .replace(/^Assistant message:\s*/i, '')
+    .trim();
+}
 
-  const initialCount = await page.locator(REPLY_SELECTORS).count().catch(() => 0);
+async function getMuseLastMessageState(page) {
+  if (typeof page.evaluate !== 'function') return null;
+  return page
+    .evaluate(() => {
+      const items = Array.from(document.querySelectorAll('[data-message-item="true"]'));
+      if (items.length === 0) return null;
+      const lastItem = items[items.length - 1];
+      const lastRole = lastItem.getAttribute('data-message-role') || '';
+      const lastText = (lastItem.innerText || '').trim();
+      const asstItems = items.filter((el) => el.getAttribute('data-message-role') === 'assistant');
+      const lastAsstText = asstItems.length > 0 ? (asstItems[asstItems.length - 1].innerText || '').trim() : '';
+      return {
+        totalItems: items.length,
+        asstCount: asstItems.length,
+        lastRole,
+        lastText,
+        lastAsstText,
+      };
+    })
+    .catch(() => null);
+}
+
+async function sendMusePromptAndWaitForReply(page, promptText, opts = {}) {
+  const { timeoutMs = 120000, pollMs = 2000, stableChecks = 2 } = opts;
+
+  const isRealBrowserPage = typeof page.evaluate === 'function';
+  const initialMsgState = isRealBrowserPage ? await getMuseLastMessageState(page) : null;
+  const repliesLocator = page.locator(REPLY_SELECTORS);
+  const initialCount = await repliesLocator.count().catch(() => 0);
+  const initialLastText = initialMsgState
+    ? cleanMuseReplyText(initialMsgState.lastAsstText)
+    : isRealBrowserPage && initialCount > 0
+      ? cleanMuseReplyText(await repliesLocator.last().innerText().catch(() => ''))
+      : '';
+
   await submitPromptOnMuse(page, promptText);
 
   const start = Date.now();
@@ -133,11 +215,36 @@ async function sendMusePromptAndWaitForReply(page, promptText, opts = {}) {
   let stableCount = 0;
 
   while (Date.now() - start < timeoutMs) {
+    if (isRealBrowserPage) {
+      const msgState = await getMuseLastMessageState(page);
+      if (msgState) {
+        // Trên Muse.ai, sau khi gửi tin nhắn user thì bubble cuối cùng phải chuyển sang role="assistant"
+        if (msgState.lastRole === 'assistant') {
+          const currentText = cleanMuseReplyText(msgState.lastText);
+          const isNewReply = currentText && currentText !== initialLastText;
+          if (isNewReply && currentText.length > 15 && currentText !== promptText.trim()) {
+            if (currentText === lastText) {
+              stableCount += 1;
+              if (stableCount >= stableChecks) {
+                return currentText;
+              }
+            } else {
+              stableCount = 0;
+            }
+            lastText = currentText;
+          }
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+        continue;
+      }
+    }
+
     const replies = page.locator(REPLY_SELECTORS);
     const count = await replies.count().catch(() => 0);
     if (count > initialCount || count > 0) {
-      const currentText = (await replies.last().innerText().catch(() => '')).trim();
-      if (currentText && currentText.length > 20 && currentText !== promptText.trim()) {
+      const currentText = cleanMuseReplyText(await replies.last().innerText().catch(() => ''));
+      const isNewReply = !isRealBrowserPage || (currentText && currentText !== initialLastText);
+      if (isNewReply && currentText && currentText.length > 20 && currentText !== promptText.trim()) {
         if (currentText === lastText) {
           stableCount += 1;
           if (stableCount >= stableChecks) {
@@ -155,21 +262,47 @@ async function sendMusePromptAndWaitForReply(page, promptText, opts = {}) {
   throw new Error(`Hết thời gian chờ (${timeoutMs / 1000}s) phản hồi kịch bản từ Muse.`);
 }
 
+async function countNonAvatarVideos(page) {
+  if (typeof page.evaluate !== 'function') return 0;
+  return page
+    .evaluate(() => {
+      const vids = Array.from(document.querySelectorAll('video')).filter(
+        (v) =>
+          !v.closest('[data-hatch-avatar-interaction]') &&
+          !v.hasAttribute('data-hatch-avatar-layer')
+      );
+      return vids.length;
+    })
+    .catch(() => 0);
+}
+
 async function extractLatestVideoUrl(page, initialVideoCount) {
+  if (typeof page.evaluate !== 'function') return null;
   return page.evaluate((prevCount) => {
-    const videos = Array.from(document.querySelectorAll('video'));
+    const videos = Array.from(document.querySelectorAll('video')).filter(
+      (v) =>
+        !v.closest('[data-hatch-avatar-interaction]') &&
+        !v.hasAttribute('data-hatch-avatar-layer')
+    );
     if (videos.length > prevCount) {
       const lastVideo = videos[videos.length - 1];
-      if (lastVideo.src && lastVideo.src.startsWith('http')) return lastVideo.src;
+      const vSrc = lastVideo.src || lastVideo.currentSrc || '';
+      if (vSrc && (vSrc.startsWith('http') || vSrc.startsWith('blob:'))) return vSrc;
       const source = lastVideo.querySelector('source');
-      if (source && source.src && source.src.startsWith('http')) return source.src;
+      if (source && source.src && (source.src.startsWith('http') || source.src.startsWith('blob:'))) {
+        return source.src;
+      }
     }
     const downloadLinks = Array.from(
       document.querySelectorAll('a[download], a[href*=".mp4"], a[href*="video"]')
     );
     for (let i = downloadLinks.length - 1; i >= 0; i--) {
       const href = downloadLinks[i].href;
-      if (href && href.startsWith('http') && (href.includes('.mp4') || downloadLinks[i].hasAttribute('download'))) {
+      if (
+        href &&
+        (href.startsWith('http') || href.startsWith('blob:')) &&
+        (href.includes('.mp4') || downloadLinks[i].hasAttribute('download'))
+      ) {
         return href;
       }
     }
@@ -177,24 +310,32 @@ async function extractLatestVideoUrl(page, initialVideoCount) {
   }, initialVideoCount);
 }
 
-async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = {}) {
-  const { timeoutMs = 420000, pollMs = 3000 } = opts;
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+async function downloadVideoUrlOrBlobToDisk(page, videoUrl, outputPath) {
+  if (videoUrl.startsWith('blob:')) {
+    const base64Data = await page.evaluate(async (bUrl) => {
+      const resp = await fetch(bUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = String(reader.result || '');
+          const commaIdx = res.indexOf(',');
+          resolve(commaIdx > -1 ? res.slice(commaIdx + 1) : res);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }, videoUrl);
 
-  const initialVideoCount = await page.locator('video').count().catch(() => 0);
-  await submitPromptOnMuse(page, promptText);
-
-  const startTime = Date.now();
-  let videoUrl = null;
-
-  while (Date.now() - startTime < timeoutMs) {
-    videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
-    if (videoUrl) break;
-    await page.waitForTimeout(pollMs);
-  }
-
-  if (!videoUrl) {
-    throw new Error('Hết thời gian chờ Muse sinh video mới (7 phút). Hãy kiểm tra cửa sổ Chrome Muse.');
+    if (base64Data) {
+      const buf = Buffer.from(base64Data, 'base64');
+      if (buf.length > 1000) {
+        fs.writeFileSync(outputPath, buf);
+        return outputPath;
+      }
+    }
+    throw new Error(`Blob video trên Muse.ai rỗng hoặc không đọc được (${videoUrl})`);
   }
 
   for (let attempt = 1; attempt <= 6; attempt++) {
@@ -212,15 +353,92 @@ async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = 
     }
     await page.waitForTimeout(3000);
   }
-
   throw new Error(`Không thể tải file video từ URL Muse: ${videoUrl}`);
+}
+
+async function tryExtractNewestLibraryVideoOnMuse(page, outputPath) {
+  try {
+    await page.goto('https://muse.ai/library/media?view=video', {
+      waitUntil: 'domcontentloaded',
+      timeout: 25000,
+    });
+    await page.waitForTimeout(3000);
+    const firstThumb = page.locator('img[src^="blob:"]').first();
+    if ((await firstThumb.count()) === 0) return null;
+    await firstThumb.click({ force: true });
+    await page.waitForTimeout(2000);
+    const blobUrl = await extractLatestVideoUrl(page, 0);
+    if (blobUrl) {
+      await downloadVideoUrlOrBlobToDisk(page, blobUrl, outputPath);
+      await dismissMuseDialogs(page);
+      await page.goto('https://muse.ai/', { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
+      return outputPath;
+    }
+  } catch (err) {
+    console.warn('[Muse Library] Không lấy được video từ thư viện Muse:', err.message);
+  }
+  return null;
+}
+
+async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = {}) {
+  const { timeoutMs = 180000, pollMs = 3000 } = opts;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+  const initialVideoCount = await countNonAvatarVideos(page);
+  const initialMsgState = await getMuseLastMessageState(page);
+  const initialLastText = initialMsgState ? cleanMuseReplyText(initialMsgState.lastAsstText) : '';
+
+  const videoRequestPrompt =
+    promptText.toLowerCase().includes('create a video') || promptText.toLowerCase().includes('tạo video')
+      ? promptText
+      : `Create a short 9:16 vertical video clip for this scene: ${promptText}`;
+
+  await submitPromptOnMuse(page, videoRequestPrompt);
+
+  const startTime = Date.now();
+  let videoUrl = null;
+  let lastReplyText = '';
+  let stableReplyChecks = 0;
+
+  while (Date.now() - startTime < timeoutMs) {
+    videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
+    if (videoUrl) break;
+
+    const msgState = await getMuseLastMessageState(page);
+    if (msgState && msgState.lastRole === 'assistant') {
+      const currentReply = cleanMuseReplyText(msgState.lastText);
+      if (currentReply && currentReply.length > 15 && currentReply !== initialLastText) {
+        if (currentReply === lastReplyText) {
+          stableReplyChecks += 1;
+          if (stableReplyChecks >= 3 && Date.now() - startTime > 8000) {
+            break;
+          }
+        } else {
+          stableReplyChecks = 0;
+        }
+        lastReplyText = currentReply;
+      }
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  if (videoUrl) {
+    return await downloadVideoUrlOrBlobToDisk(page, videoUrl, outputPath);
+  }
+
+  // Nếu Muse lưu video mới vào mục Thư viện Video (/library/media?view=video), tự động lấy từ Thư viện
+  const libSaved = await tryExtractNewestLibraryVideoOnMuse(page, outputPath);
+  if (libSaved) return libSaved;
+
+  throw new Error('Hết thời gian chờ Muse sinh video mới. Đang chuyển sang phương án dự phòng.');
 }
 
 async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US') {
   const prompt = buildDirectorPrompt(rawScript, kind, market);
   let reply;
   try {
-    reply = await sendMusePromptAndWaitForReply(page, prompt);
+    reply = await sendMusePromptAndWaitForReply(page, prompt, { timeoutMs: 45000 });
     const parsed = extractJson(reply);
     return {
       scenes: normalizeScenes(parsed.scenes),
@@ -232,7 +450,8 @@ async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US'
     if (!(err instanceof JsonExtractionError)) throw err;
     const retryReply = await sendMusePromptAndWaitForReply(
       page,
-      'Please output ONLY valid JSON matching the exact schema requested above, with no markdown prose.'
+      'Please output ONLY valid JSON matching the exact schema requested above, with no markdown prose.',
+      { timeoutMs: 35000 }
     );
     const parsed = extractJson(retryReply);
     return {
@@ -260,15 +479,33 @@ function buildMuseFullVideoPrompt({ topic, rawScript, market = 'US', aspectRatio
   return (
     `Create a complete, high-retention ${aspectRatio} YouTube video for the ${marketPreset.name} (${marketPreset.locale}) market.\n` +
     `Style: ${kind === 'handdrawn' ? '2D hand-drawn explainer illustration' : 'Cinematic 3D / photorealistic storytelling'}.\n` +
-    `Language & Voiceover: Native ${marketPreset.locale} (${marketPreset.scriptInstruction}).\n` +
-    `Topic / Script:\n${content}`
+    `Language for voiceover/captions: ${marketPreset.language} (${marketPreset.locale}).\n` +
+    `Topic / Script:\n${content}\n\n` +
+    `Please generate the full video with engaging visual hooks, smooth transitions, dynamic pacing, and clear storytelling.`
   );
 }
 
-async function generateFullVideoWithMuse(page, params, outputPath) {
-  const prompt = buildMuseFullVideoPrompt(params);
-  await waitForMuseVideoAndDownload(page, prompt, outputPath);
-  return outputPath;
+async function generateFullVideoWithMuse(page, opts = {}) {
+  const {
+    topic,
+    rawScript,
+    market = 'US',
+    aspectRatio = '9:16',
+    kind = 'story',
+    outputPath,
+    timeoutMs = 240000,
+  } = opts;
+
+  if (!outputPath) {
+    throw new Error('Thiếu outputPath để lưu video từ Muse.');
+  }
+
+  const promptText = buildMuseFullVideoPrompt({ topic, rawScript, market, aspectRatio, kind });
+  await waitForMuseVideoAndDownload(page, promptText, outputPath, { timeoutMs });
+  return {
+    outputPath,
+    promptText,
+  };
 }
 
 module.exports = {
@@ -282,4 +519,5 @@ module.exports = {
   generateSceneMediaWithMuse,
   buildMuseFullVideoPrompt,
   generateFullVideoWithMuse,
+  launchHiddenChromeMuseProfile,
 };

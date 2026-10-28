@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 const DouyinScraper = require('./services/scraper');
 const VideoRemaker = require('./services/remaker');
@@ -512,10 +513,10 @@ app.get('/api/muse/status', async (req, res) => {
   }
 });
 
-// 22d. Mở trình duyệt Google Chrome với --remote-debugging-port=9222 trỏ tới Muse.ai (#1) và Gemini Ultra (#2)
+// 22d. Khởi chạy / kết nối Google Chrome với --remote-debugging-port=9222 (Chạy ngầm --headless=new mặc định với profile camhien2000qt@gmail.com)
 app.post('/api/muse/open-browser', async (req, res) => {
   try {
-    const { museUrl = DEFAULT_MUSE_URL } = req.body || {};
+    const { museUrl = DEFAULT_MUSE_URL, visible = false } = req.body || {};
     const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
     if (!fs.existsSync(chromePath)) {
       return res.status(404).json({
@@ -525,25 +526,30 @@ app.post('/api/muse/open-browser', async (req, res) => {
     const profileDir = path.join(__dirname, 'storage', 'chrome-muse-profile');
     if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-    const child = spawn(
-      chromePath,
-      [
-        '--remote-debugging-port=9222',
-        `--user-data-dir=${profileDir}`,
-        '--no-first-run',
-        '--no-default-browser-check',
-        museUrl,
-        'https://gemini.google.com/app',
-      ],
-      { detached: true, stdio: 'ignore' }
-    );
+    const args = [
+      '--remote-debugging-port=9222',
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--mute-audio',
+      '--window-size=1440,900',
+    ];
+    if (!visible) {
+      args.unshift('--headless=new');
+    }
+    args.push(museUrl, 'https://gemini.google.com/app');
+
+    const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
     child.unref();
 
     res.json({
       success: true,
-      message: `Đã mở Google Chrome (CDP Port 9222) với Muse.ai (Ưu tiên #1) và Gemini Ultra (Dự phòng #2)!`,
+      message: visible
+        ? `Đã mở cửa sổ Chrome (CDP 9222 - camhien2000qt@gmail.com) với Muse.ai (#1) và Gemini Ultra (#2)!`
+        : `Đã kích hoạt ngầm (Headless 100%) profile camhien2000qt@gmail.com trên cổng 9222 với Muse.ai (#1) và Gemini Ultra (#2)!`,
       profileDir,
       museUrl,
+      headless: !visible,
     });
   } catch (err) {
     console.error('Lỗi mở Chrome Muse:', err);
@@ -1142,7 +1148,7 @@ app.post(
       if (aiEngine !== 'remotion_only') {
         if (aiEngine === 'gemini_first') {
           try {
-            const { page } = await connectToGeminiPage(undefined, 1500, false);
+            const { page } = await connectToGeminiPage(undefined, 2500, true);
             scenes = await planScenes(page, rawScript, kind, {
               layoutMode: project.layoutMode,
               targetDuration: project.targetDuration,
@@ -1152,20 +1158,22 @@ app.post(
             });
           } catch (_gemErr) {
             try {
-              const { page } = await connectToMusePage({ autoLaunch: false });
-              scenes = await planScenesWithMuse(page, rawScript, kind, market);
+              const { page } = await connectToMusePage({ autoLaunch: true, headless: true });
+              const musePlan = await planScenesWithMuse(page, rawScript, kind, market);
+              scenes = Array.isArray(musePlan) ? musePlan : musePlan?.scenes;
             } catch (_museErr) {}
           }
         } else {
-          // Mặc định: Ưu tiên số 1 là Muse.ai -> Dự phòng số 2 là Gemini Ultra
+          // Mặc định: Ưu tiên số 1 là Muse.ai (Headless camhien2000qt@gmail.com) -> Dự phòng số 2 là Gemini Ultra
           try {
-            const { page } = await connectToMusePage({ autoLaunch: false });
-            scenes = await planScenesWithMuse(page, rawScript, kind, market);
+            const { page } = await connectToMusePage({ autoLaunch: true, headless: true });
+            const musePlan = await planScenesWithMuse(page, rawScript, kind, market);
+            scenes = Array.isArray(musePlan) ? musePlan : musePlan?.scenes;
           } catch (musePlanErr) {
-            console.warn('[Director] Muse.ai chưa sẵn sàng khi chia scene, chuyển sang Gemini Ultra (#2):', musePlanErr.message);
+            console.warn('[Director] Muse.ai chưa trả về JSON scene, chuyển sang Gemini Ultra (#2):', musePlanErr.message);
             if (aiEngine !== 'muse_only') {
               try {
-                const { page } = await connectToGeminiPage(undefined, 1500, false);
+                const { page } = await connectToGeminiPage(undefined, 2500, true);
                 scenes = await planScenes(page, rawScript, kind, {
                   layoutMode: project.layoutMode,
                   targetDuration: project.targetDuration,
@@ -1174,7 +1182,7 @@ app.post(
                   filmAssets: filmCtx.filmAssets,
                 });
               } catch (cdpErr) {
-                console.warn('[Director] Gemini Ultra chưa mở, dùng bộ chia scene thông minh cục bộ:', cdpErr.message);
+                console.warn('[Director] Gemini Ultra chưa sẵn sàng, dùng bộ chia scene thông minh cục bộ:', cdpErr.message);
               }
             }
           }
@@ -1462,7 +1470,9 @@ app.post(
       res.json({ success: true, data: updated });
     } catch (err) {
       console.error('Lỗi generate video:', err);
-      videoGenStore.updateProject(req.params.id, { status: 'failed', error: err.message });
+      try {
+        videoGenStore.updateProject(req.params.id, { status: 'failed', error: err.message });
+      } catch (_ignore) {}
       res.status(500).json({ error: err.message });
     }
   })
@@ -1482,7 +1492,9 @@ app.post(
       res.json({ success: true, data: updated });
     } catch (err) {
       console.error('Lỗi render-only video:', err);
-      videoGenStore.updateProject(req.params.id, { status: 'failed', error: err.message });
+      try {
+        videoGenStore.updateProject(req.params.id, { status: 'failed', error: err.message });
+      } catch (_ignore) {}
       res.status(500).json({ error: err.message });
     }
   })
