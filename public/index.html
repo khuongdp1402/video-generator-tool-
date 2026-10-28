@@ -270,6 +270,23 @@
               </div>
             </div>
 
+            <div class="form-group" style="background:rgba(99,102,241,0.09);border:1px solid rgba(99,102,241,0.35);padding:10px 12px;border-radius:10px;margin-bottom:12px;">
+              <label style="color:#a5b4fc;font-weight:700;margin-bottom:6px;display:block;">
+                🚀 Engine Triển Khai Video AI (Đã đặt Muse.ai làm Ưu Tiên Số 1):
+              </label>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <select id="vgAiEngine" class="form-select" style="flex:1;min-width:260px;">
+                  <option value="muse_first" selected>🚀 Muse.ai (Ưu tiên #1) ➔ Gemini Ultra (Dự phòng #2) · Khuyên dùng</option>
+                  <option value="muse_only">🟣 Chỉ dùng Muse.ai (100% Muse Studio)</option>
+                  <option value="gemini_first">🔵 Gemini Ultra Veo (Ưu tiên #1) ➔ Muse.ai (Dự phòng #2)</option>
+                  <option value="remotion_only">⚡ Chỉ dùng Remotion Studio (Đồ họa Vector/Surreal nội bộ)</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnOpenMuseGeminiChrome" style="white-space:nowrap;height:38px;" title="Mở trình duyệt Chrome cổng 9222 có sẵn Tab 1: Muse.ai và Tab 2: Gemini Ultra">
+                  🌐 Mở Chrome Muse.ai #1 + Gemini #2
+                </button>
+              </div>
+            </div>
+
             <div class="form-grid-2" style="align-items:end;">
               <div class="form-group">
                 <label>🎙️ Giọng đọc Neural Studio (Đã bật lọc âm & cắt khoảng nghỉ):</label>
@@ -352,12 +369,15 @@
             </div>
 
             <div class="button-row" style="margin-top:16px;flex-wrap:wrap;">
-              <button class="btn btn-secondary" id="vgPlanBtn" style="flex:1;">🎬 Chia Scene Chi Tiết</button>
+              <button class="btn btn-secondary" id="vgPlanBtn" style="flex:1;">🎬 Chia Scene (Muse.ai #1 ➔ Gemini #2)</button>
               <button class="btn btn-primary" id="vgAddBatchBtn" style="flex:1;">＋ Thêm Vào Hàng Đợi</button>
             </div>
-            <div style="margin-top:10px;">
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+              <button class="btn btn-primary btn-block" id="vgMusePrimaryGenBtn" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;font-weight:700;" title="Triển khai toàn bộ video qua Muse.ai (Ưu tiên #1) và Gemini Ultra (Dự phòng #2) + Giọng đọc Neural Studio + Render MP4">
+                🚀 Triển Khai Video Qua Muse.ai (#1) ➔ Gemini Ultra (#2) + Render MP4
+              </button>
               <button class="btn btn-emerald btn-block" id="vgInstantRenderBtn" title="Chia scene + tạo giọng đọc tiếng Việt Edge-TTS + Render video MP4 ngay bằng Remotion (Pictogram & Surreal Animation)">
-                ⚡ Tạo & Render Nhanh Ngay Bằng Remotion (Có Giọng Đọc + Phụ Đề Song Ngữ)
+                ⚡ Tạo & Render Nhanh Ngay Bằng Remotion (Đồ Họa Nội Bộ + Giọng Đọc + Phụ Đề Song Ngữ)
               </button>
             </div>
 
@@ -367,7 +387,7 @@
                 <h4 id="vgActiveProjectTitle">Chi tiết phân cảnh (Scenes)</h4>
                 <div style="display:flex;gap:8px;">
                   <button class="btn btn-secondary btn-sm" id="vgRenderOnlyBtn">⚡ Render Nhanh Remotion</button>
-                  <button class="btn btn-primary btn-sm" id="vgGenerateBtn" hidden>🎨 Sinh Video Veo + Render</button>
+                  <button class="btn btn-primary btn-sm" id="vgGenerateBtn" hidden>🚀 Sinh Video (Muse.ai #1 ➔ Gemini #2) + Render</button>
                 </div>
               </div>
               <div id="vgSceneGrid" class="vf-scene-grid"></div>
@@ -391,8 +411,8 @@
               </div>
               <div style="display:flex;gap:8px;">
                 <button class="btn btn-secondary btn-sm" id="vgQueueStopBtn">⏹ Dừng</button>
-                <button class="btn btn-emerald btn-sm" id="vgQueueStartRenderBtn" title="Chạy toàn bộ hàng đợi bằng chế độ Remotion + TTS nhanh">⚡ Chạy Nhanh Tất Cả</button>
-                <button class="btn btn-primary btn-sm" id="vgQueueStartVeoBtn" title="Chạy toàn bộ hàng đợi kèm sinh video Gemini Veo">▶ Chạy Veo + Render</button>
+                <button class="btn btn-emerald btn-sm" id="vgQueueStartRenderBtn" title="Chạy toàn bộ hàng đợi bằng chế độ Remotion + TTS nhanh">⚡ Chạy Nhanh Remotion</button>
+                <button class="btn btn-primary btn-sm" id="vgQueueStartVeoBtn" title="Chạy toàn bộ hàng đợi qua Muse.ai (#1) và Gemini Ultra (#2)">🚀 Chạy Muse.ai (#1) ➔ Gemini (#2)</button>
               </div>
             </div>
 

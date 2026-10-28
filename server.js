@@ -512,7 +512,7 @@ app.get('/api/muse/status', async (req, res) => {
   }
 });
 
-// 22d. Mở trình duyệt Google Chrome với --remote-debugging-port=9222 trỏ tới Muse.ai
+// 22d. Mở trình duyệt Google Chrome với --remote-debugging-port=9222 trỏ tới Muse.ai (#1) và Gemini Ultra (#2)
 app.post('/api/muse/open-browser', async (req, res) => {
   try {
     const { museUrl = DEFAULT_MUSE_URL } = req.body || {};
@@ -533,6 +533,7 @@ app.post('/api/muse/open-browser', async (req, res) => {
         '--no-first-run',
         '--no-default-browser-check',
         museUrl,
+        'https://gemini.google.com/app',
       ],
       { detached: true, stdio: 'ignore' }
     );
@@ -540,7 +541,7 @@ app.post('/api/muse/open-browser', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Đã mở Google Chrome (CDP Port 9222) tới ${museUrl}!`,
+      message: `Đã mở Google Chrome (CDP Port 9222) với Muse.ai (Ưu tiên #1) và Gemini Ultra (Dự phòng #2)!`,
       profileDir,
       museUrl,
     });
@@ -1099,6 +1100,8 @@ app.post(
         voice = 'vi-VN-NamMinhNeural',
         voiceRate = '+20%',
         market = 'VI',
+        aiEngine = 'muse_first',
+        mediaMode = 'muse',
       } = req.body;
 
       if (!rawScript || !rawScript.trim()) {
@@ -1115,6 +1118,8 @@ app.post(
         market,
         voice,
         voiceRate,
+        aiEngine,
+        mediaMode,
         aspectRatio,
         layoutMode,
         channelName,
@@ -1133,18 +1138,49 @@ app.post(
         ? filmStore.resolveSceneContext(projectId, sceneNo || 1, refs, null)
         : { filmRules: '', sceneRules: [], filmAssets: [], resolvedRefs: refs };
 
-      let scenes;
-      try {
-        const { page } = await connectToGeminiPage(undefined, 1500, false);
-        scenes = await planScenes(page, rawScript, kind, {
-          layoutMode: project.layoutMode,
-          targetDuration: project.targetDuration,
-          filmRules: filmCtx.filmRules,
-          sceneRules: filmCtx.sceneRules,
-          filmAssets: filmCtx.filmAssets,
-        });
-      } catch (cdpErr) {
-        console.warn('[Director] Không kết nối được Chrome CDP 9222, chuyển sang chia scene thông minh cục bộ:', cdpErr.message);
+      let scenes = null;
+      if (aiEngine !== 'remotion_only') {
+        if (aiEngine === 'gemini_first') {
+          try {
+            const { page } = await connectToGeminiPage(undefined, 1500, false);
+            scenes = await planScenes(page, rawScript, kind, {
+              layoutMode: project.layoutMode,
+              targetDuration: project.targetDuration,
+              filmRules: filmCtx.filmRules,
+              sceneRules: filmCtx.sceneRules,
+              filmAssets: filmCtx.filmAssets,
+            });
+          } catch (_gemErr) {
+            try {
+              const { page } = await connectToMusePage({ autoLaunch: false });
+              scenes = await planScenesWithMuse(page, rawScript, kind, market);
+            } catch (_museErr) {}
+          }
+        } else {
+          // Mặc định: Ưu tiên số 1 là Muse.ai -> Dự phòng số 2 là Gemini Ultra
+          try {
+            const { page } = await connectToMusePage({ autoLaunch: false });
+            scenes = await planScenesWithMuse(page, rawScript, kind, market);
+          } catch (musePlanErr) {
+            console.warn('[Director] Muse.ai chưa sẵn sàng khi chia scene, chuyển sang Gemini Ultra (#2):', musePlanErr.message);
+            if (aiEngine !== 'muse_only') {
+              try {
+                const { page } = await connectToGeminiPage(undefined, 1500, false);
+                scenes = await planScenes(page, rawScript, kind, {
+                  layoutMode: project.layoutMode,
+                  targetDuration: project.targetDuration,
+                  filmRules: filmCtx.filmRules,
+                  sceneRules: filmCtx.sceneRules,
+                  filmAssets: filmCtx.filmAssets,
+                });
+              } catch (cdpErr) {
+                console.warn('[Director] Gemini Ultra chưa mở, dùng bộ chia scene thông minh cục bộ:', cdpErr.message);
+              }
+            }
+          }
+        }
+      }
+      if (!Array.isArray(scenes) || scenes.length === 0) {
         scenes = buildInstantLocalScenes(rawScript, kind, project.layoutMode);
       }
 
@@ -1178,6 +1214,8 @@ app.post('/api/video-gen/batches', (req, res) => {
       voice = 'vi-VN-NamMinhNeural',
       voiceRate = '+20%',
       market = 'VI',
+      aiEngine = 'muse_first',
+      mediaMode = 'muse',
       prompts = [],
       items = [],
     } = req.body;
@@ -1207,6 +1245,8 @@ app.post('/api/video-gen/batches', (req, res) => {
         market,
         voice,
         voiceRate,
+        aiEngine,
+        mediaMode,
         aspectRatio,
         layoutMode,
         channelName,
@@ -1271,41 +1311,77 @@ async function executeProjectGeneration(id, options = {}) {
 
   if (!renderOnly) {
     videoGenStore.updateProject(id, { status: 'generating_media' });
-    const mediaMode = options.mediaMode || project.mediaMode || 'playwright';
+    const aiEngine = options.aiEngine || project.aiEngine || 'muse_first';
+    const museUrl = options.museUrl || DEFAULT_MUSE_URL;
+
+    const runMusePass = async () => {
+      const { page } = await connectToMusePage({ museUrl });
+      for (const scene of project.scenes) {
+        if (scene.mediaStatus === 'video') continue;
+        try {
+          const result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR);
+          scene.mediaStatus = result.mediaStatus;
+          scene.mediaFile = result.mediaFile;
+          scene.provider = 'muse.ai';
+          scene.error = null;
+        } catch (sceneErr) {
+          scene.mediaStatus = 'pending';
+          scene.error = `[Muse.ai] ${sceneErr.message}`;
+        }
+        videoGenStore.updateProject(id, { scenes: project.scenes });
+      }
+    };
+
+    const runGeminiPass = async () => {
+      const { page } = await connectToGeminiPage();
+      for (const scene of project.scenes) {
+        if (scene.mediaStatus === 'video') continue;
+        try {
+          const result = await generateSceneMedia(page, scene, MEDIA_DIR, {
+            projectId: project.id,
+            refs: filmCtx.resolvedRefs,
+          });
+          scene.mediaStatus = result.mediaStatus;
+          scene.mediaFile = result.mediaFile;
+          scene.provider = 'gemini_ultra';
+          scene.error = null;
+          project.threadUrl = result.threadUrl || project.threadUrl;
+        } catch (sceneErr) {
+          scene.mediaStatus = 'pending';
+          scene.error = `[Gemini Ultra] ${sceneErr.message}`;
+        }
+        videoGenStore.updateProject(id, { scenes: project.scenes, threadUrl: project.threadUrl });
+      }
+    };
+
     try {
-      if (mediaMode === 'muse') {
-        const { page } = await connectToMusePage({ museUrl: options.museUrl || DEFAULT_MUSE_URL });
-        for (const scene of project.scenes) {
-          if (scene.mediaStatus === 'video') continue;
-          try {
-            const result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR);
-            scene.mediaStatus = result.mediaStatus;
-            scene.mediaFile = result.mediaFile;
-            scene.error = null;
-          } catch (sceneErr) {
-            scene.mediaStatus = 'pending';
-            scene.error = sceneErr.message;
-          }
-          videoGenStore.updateProject(id, { scenes: project.scenes });
+      if (aiEngine === 'gemini_first') {
+        try {
+          await runGeminiPass();
+        } catch (gemErr) {
+          console.warn('[Generate] Gemini Ultra (#1) gặp lỗi, chuyển sang Muse.ai (#2):', gemErr.message);
+        }
+        if (project.scenes.some((s) => s.mediaStatus !== 'video')) {
+          await runMusePass();
         }
       } else {
-        const { page } = await connectToGeminiPage();
-        for (const scene of project.scenes) {
-          if (scene.mediaStatus === 'video') continue;
+        // Mặc định: Ưu tiên số 1 là Muse.ai -> Dự phòng số 2 là Gemini Ultra
+        let museError = null;
+        try {
+          await runMusePass();
+        } catch (err) {
+          museError = err;
+          console.warn('[Generate] Muse.ai (Ưu tiên #1) gặp lỗi, tự động chuyển sang Gemini Ultra (Dự phòng #2):', err.message);
+        }
+        if (aiEngine !== 'muse_only' && project.scenes.some((s) => s.mediaStatus !== 'video')) {
           try {
-            const result = await generateSceneMedia(page, scene, MEDIA_DIR, {
-              projectId: project.id,
-              refs: filmCtx.resolvedRefs,
-            });
-            scene.mediaStatus = result.mediaStatus;
-            scene.mediaFile = result.mediaFile;
-            scene.error = null;
-            project.threadUrl = result.threadUrl || project.threadUrl;
-          } catch (sceneErr) {
-            scene.mediaStatus = 'pending';
-            scene.error = sceneErr.message;
+            await runGeminiPass();
+          } catch (gemErr) {
+            if (museError) throw new Error(`Muse.ai (#1): ${museError.message} | Gemini Ultra (#2): ${gemErr.message}`);
+            throw gemErr;
           }
-          videoGenStore.updateProject(id, { scenes: project.scenes, threadUrl: project.threadUrl });
+        } else if (museError && aiEngine === 'muse_only') {
+          throw museError;
         }
       }
     } catch (cdpErr) {
@@ -1313,7 +1389,7 @@ async function executeProjectGeneration(id, options = {}) {
         videoGenStore.updateProject(id, { status: 'media_failed', error: cdpErr.message });
         throw cdpErr;
       }
-      console.warn('[Generate] Chrome CDP không mở, tiếp tục TTS + Remotion Render với vector animation:', cdpErr.message);
+      console.warn('[Generate] Muse.ai & Gemini Ultra chưa sẵn sàng, tiếp tục TTS + Remotion Render:', cdpErr.message);
     }
   }
 
@@ -1378,6 +1454,8 @@ app.post(
       const updated = await executeProjectGeneration(req.params.id, {
         renderOnly: Boolean(req.body && req.body.renderOnly),
         allowFallbackRender: Boolean(req.body && req.body.allowFallbackRender),
+        aiEngine: req.body?.aiEngine || 'muse_first',
+        mediaMode: req.body?.mediaMode || 'muse',
         voice: req.body?.voice,
         voiceRate: req.body?.voiceRate,
       });
@@ -1456,7 +1534,7 @@ app.post('/api/video-gen/queue/stop', (req, res) => {
   res.json({ success: true, running: false });
 });
 
-// 25. Sinh lại media cho 1 scene bị lỗi
+// 25. Sinh lại media cho 1 scene bị lỗi (Ưu tiên #1: Muse.ai -> Dự phòng #2: Gemini Ultra)
 app.post(
   '/api/video-gen/:id/retry-scene/:sceneId',
   withGenerationLock(async (req, res) => {
@@ -1467,11 +1545,40 @@ app.post(
       const scene = project.scenes.find((s) => String(s.id) === sceneId);
       if (!scene) return res.status(404).json({ error: 'Không tìm thấy scene' });
 
-      const { page } = await connectToGeminiPage();
-      const result = await generateSceneMedia(page, scene, MEDIA_DIR, {
-        projectId: project.id,
-        refs: project.refs || [],
-      });
+      const aiEngine = req.body?.aiEngine || project.aiEngine || 'muse_first';
+      let result = null;
+
+      if (aiEngine === 'gemini_first') {
+        try {
+          const { page } = await connectToGeminiPage();
+          result = await generateSceneMedia(page, scene, MEDIA_DIR, {
+            projectId: project.id,
+            refs: project.refs || [],
+          });
+          scene.provider = 'gemini_ultra';
+        } catch (_gemErr) {
+          const { page } = await connectToMusePage({ museUrl: DEFAULT_MUSE_URL });
+          result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR);
+          scene.provider = 'muse.ai';
+        }
+      } else {
+        // Mặc định: Ưu tiên số 1 Muse.ai -> Dự phòng số 2 Gemini Ultra
+        try {
+          const { page } = await connectToMusePage({ museUrl: DEFAULT_MUSE_URL });
+          result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR);
+          scene.provider = 'muse.ai';
+        } catch (museErr) {
+          console.warn(`[RetryScene] Muse.ai (#1) lỗi (${museErr.message}), chuyển sang Gemini Ultra (#2)...`);
+          if (aiEngine === 'muse_only') throw museErr;
+          const { page } = await connectToGeminiPage();
+          result = await generateSceneMedia(page, scene, MEDIA_DIR, {
+            projectId: project.id,
+            refs: project.refs || [],
+          });
+          scene.provider = 'gemini_ultra';
+        }
+      }
+
       scene.mediaStatus = result.mediaStatus;
       scene.mediaFile = result.mediaFile;
       scene.error = null;
@@ -1483,7 +1590,7 @@ app.post(
       const rawMsg = String(err.message || err);
       const friendlyMsg =
         rawMsg.includes('ECONNREFUSED') || rawMsg.includes('Timeout') || rawMsg.includes('waitFor')
-          ? 'Đã mở cửa sổ Chrome AI (cổng 9222). Bạn hãy đăng nhập tài khoản Gemini/Muse trên cửa sổ Chrome vừa bật để tạo video Veo AI, hoặc bấm nút xanh lá "⚡ Render Nhanh Remotion" để xuất MP4 ngay bằng đồ họa dựng sẵn (không cần tài khoản).'
+          ? 'Đã tự động mở cửa sổ Chrome AI (cổng 9222) với Muse.ai (Ưu tiên #1) và Gemini Ultra (Dự phòng #2). Bạn hãy đăng nhập tài khoản Muse.ai / Gemini trên cửa sổ Chrome vừa bật để tạo video AI!'
           : rawMsg;
       res.status(500).json({ error: friendlyMsg });
     }

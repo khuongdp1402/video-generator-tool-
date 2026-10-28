@@ -257,6 +257,8 @@ function setupEventListeners() {
   });
 
   // Video Gen Action Buttons
+  document.getElementById('btnOpenMuseGeminiChrome')?.addEventListener('click', openMuseGeminiChromeHandler);
+  document.getElementById('vgMusePrimaryGenBtn')?.addEventListener('click', vgMusePrimaryGenerateCurrent);
   document.getElementById('vgPlanBtn')?.addEventListener('click', vgPlanScenes);
   document.getElementById('vgAddBatchBtn')?.addEventListener('click', vgAddBatchToQueue);
   document.getElementById('vgInstantRenderBtn')?.addEventListener('click', vgInstantRenderCurrent);
@@ -420,10 +422,13 @@ function getVgCommonPayload() {
   const projectEl = document.getElementById('vgFilmProjectSelect');
   const voiceEl = document.getElementById('vgVoice');
   const voiceRateEl = document.getElementById('vgVoiceRate');
+  const aiEngineEl = document.getElementById('vgAiEngine');
 
   const voice = voiceEl?.value || 'vi-VN-NamMinhNeural';
   const voiceRate = voiceRateEl?.value || '+20%';
   const market = voice.startsWith('en-') ? 'US' : voice.startsWith('ja-') ? 'JP' : 'VI';
+  const aiEngine = aiEngineEl?.value || 'muse_first';
+  const mediaMode = aiEngine === 'gemini_first' ? 'gemini' : 'muse';
 
   return {
     kind: kindEl?.value || 'psych_split',
@@ -438,8 +443,70 @@ function getVgCommonPayload() {
     voice,
     voiceRate,
     market,
+    aiEngine,
+    mediaMode,
     refs: (vgUploadedRefs || []).map(r => r.ref || r.path || r.url).filter(Boolean)
   };
+}
+
+async function openMuseGeminiChromeHandler() {
+  try {
+    showToast('🌐 Đang mở Chrome AI (Cổng 9222) với Tab 1: Muse.ai (#1) & Tab 2: Gemini Ultra (#2)...');
+    const res = await fetch('/api/muse/open-browser', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không mở được Chrome');
+    showToast('✅ ' + (json.message || 'Đã mở Chrome Muse.ai (#1) & Gemini Ultra (#2)!'));
+  } catch (err) {
+    alert('Lỗi mở trình duyệt Chrome AI: ' + err.message);
+  }
+}
+
+async function vgMusePrimaryGenerateCurrent() {
+  const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
+  if (!rawScript && !vgCurrentProjectId) {
+    return alert('Vui lòng nhập hoặc chọn chủ đề tự sinh kịch bản trước khi triển khai!');
+  }
+
+  const btn = document.getElementById('vgMusePrimaryGenBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang triển khai qua Muse.ai (#1) ➔ Gemini Ultra (#2) + Render...';
+  }
+
+  try {
+    const common = getVgCommonPayload();
+    if (common.aiEngine === 'remotion_only') {
+      await vgInstantRenderCurrent();
+      return;
+    }
+
+    if (!vgCurrentProjectId || rawScript) {
+      const planRes = await fetch('/api/video-gen/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...common, rawScript })
+      });
+      const planJson = await planRes.json();
+      if (!planJson.success) throw new Error(planJson.error);
+      vgCurrentProjectId = planJson.data.id;
+      const projView = document.getElementById('vgProjectView');
+      if (projView) projView.hidden = false;
+      vgRenderProject(planJson.data);
+    }
+
+    await vgGenerateAndRender();
+  } catch (err) {
+    alert('Lỗi triển khai video Muse.ai / Gemini Ultra: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🚀 Triển Khai Video Qua Muse.ai (#1) ➔ Gemini Ultra (#2) + Render MP4';
+    }
+  }
 }
 
 async function previewStudioVoice() {
@@ -813,12 +880,18 @@ function vgRenderProject(project) {
 
 async function vgRetryScene(projectId, sceneId) {
   try {
-    showToast('🔄 Đang tạo lại media cho cảnh...');
-    const res = await fetch(`/api/video-gen/${projectId}/retry-scene/${sceneId}`, { method: 'POST' });
+    const common = getVgCommonPayload();
+    showToast('🔄 Đang tạo lại media cho cảnh (Ưu tiên #1: Muse.ai ➔ Dự phòng #2: Gemini Ultra)...');
+    const res = await fetch(`/api/video-gen/${projectId}/retry-scene/${sceneId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aiEngine: common.aiEngine, mediaMode: common.mediaMode })
+    });
     const json = await res.json();
     if (!json.success) return alert(json.error);
     vgRenderProject(json.data);
     await loadVgQueue();
+    showToast('✅ Đã tạo lại media cho cảnh hoàn tất!');
   } catch (err) {
     alert('Lỗi: ' + err.message);
   }
@@ -827,8 +900,10 @@ async function vgRetryScene(projectId, sceneId) {
 async function vgGenerateAndRender() {
   if (!vgCurrentProjectId) return;
   const btn = document.getElementById('vgGenerateBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang sinh Veo Media + Render...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang sinh Video (Muse.ai #1 ➔ Gemini #2) + Render...';
+  }
 
   const pollInterval = setInterval(async () => {
     try {
@@ -844,6 +919,8 @@ async function vgGenerateAndRender() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        aiEngine: common.aiEngine,
+        mediaMode: common.mediaMode,
         voice: common.voice,
         voiceRate: common.voiceRate
       })
@@ -853,13 +930,15 @@ async function vgGenerateAndRender() {
     vgRenderProject(json.data);
     await loadVgQueue();
     await loadUnifiedLibrary();
-    showToast('🎨 Đã sinh Veo Media & Render hoàn tất!');
+    showToast('🚀 Đã sinh Media qua Muse.ai / Gemini Ultra & Render hoàn tất!');
   } catch (err) {
     alert('Lỗi: ' + err.message);
   } finally {
     clearInterval(pollInterval);
-    btn.disabled = false;
-    btn.innerText = '🎨 Sinh Media Veo + Render';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🚀 Sinh Video (Muse.ai #1 ➔ Gemini #2) + Render';
+    }
   }
 }
 
@@ -1004,10 +1083,20 @@ async function runBatchQueue(mode = 'render-only') {
   for (const item of targetItems) {
     if (!vgBatchRunning) break;
     try {
+      const common = getVgCommonPayload();
       const endpoint = mode === 'render-only'
         ? `/api/video-gen/${item.id}/render-only`
         : `/api/video-gen/${item.id}/generate`;
-      await fetch(endpoint, { method: 'POST' });
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aiEngine: common.aiEngine,
+          mediaMode: common.mediaMode,
+          voice: common.voice,
+          voiceRate: common.voiceRate
+        })
+      });
       await loadVgQueue();
     } catch (e) {
       console.error('Batch item error:', e);

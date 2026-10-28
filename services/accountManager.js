@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const DEFAULT_PROFILE_DIR = path.join(__dirname, '..', '.chrome_profile');
+const DEFAULT_PROFILE_DIR = path.join(__dirname, '..', 'storage', 'chrome-muse-profile');
 
 function createAccountManager(dataFile) {
   const activeLoginBrowsers = new Map();
@@ -23,8 +23,9 @@ function createAccountManager(dataFile) {
     return {
       accounts: [
         {
-          id: 'acc_default',
-          name: 'Gemini Ultra Chính (CDP 9222)',
+          id: 'acc_muse_primary',
+          name: 'Muse.ai Chính (Ưu tiên #1 · CDP 9222)',
+          provider: 'muse',
           profile_path: DEFAULT_PROFILE_DIR,
           cdp_port: 9222,
           proxy: null,
@@ -32,7 +33,22 @@ function createAccountManager(dataFile) {
           auth_status: 'valid',
           auth_checked_at: now,
           auth_error: null,
-          balance: 'Gemini Ultra · Unlimited Web',
+          balance: '🚀 Ưu tiên #1 · Muse.ai Video Studio',
+          cookies_count: 0,
+          created_at: now,
+        },
+        {
+          id: 'acc_default',
+          name: 'Gemini Ultra (Dự phòng #2 · CDP 9222)',
+          provider: 'gemini',
+          profile_path: DEFAULT_PROFILE_DIR,
+          cdp_port: 9222,
+          proxy: null,
+          enabled: true,
+          auth_status: 'valid',
+          auth_checked_at: now,
+          auth_error: null,
+          balance: '⚡ Ưu tiên #2 · Gemini Ultra Veo',
           cookies_count: 0,
           created_at: now,
         },
@@ -305,9 +321,12 @@ function createAccountManager(dataFile) {
 
     const context = await chromium.launchPersistentContext(acc.profile_path, launchOpts);
     activeLoginBrowsers.set(id, context);
-    const page = context.pages()[0] || (await context.newPage());
-    await page.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded' }).catch(() => {});
-    updateAccount(id, { auth_status: 'valid', balance: '⚡ Gemini Ultra · LIVE' });
+    const page1 = context.pages()[0] || (await context.newPage());
+    await page1.goto('https://muse.ai', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    const page2 = await context.newPage();
+    await page2.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page1.bringToFront().catch(() => {});
+    updateAccount(id, { auth_status: 'valid', balance: '🚀 Muse.ai #1 + Gemini Ultra #2 · LIVE' });
     return { opened: true, accountId: id };
   }
 
