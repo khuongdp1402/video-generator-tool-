@@ -39,13 +39,15 @@ async function refreshAllStudioData() {
 }
 
 function showToast(msg) {
-  const toast = document.getElementById('studioToast');
+  const toast = document.getElementById('studio-toast') || document.getElementById('studioToast');
   if (!toast) return;
   toast.innerText = msg;
   toast.hidden = false;
+  toast.classList.remove('hidden');
   clearTimeout(window.__toastTimer);
   window.__toastTimer = setTimeout(() => {
     toast.hidden = true;
+    toast.classList.add('hidden');
   }, 3800);
 }
 
@@ -120,66 +122,108 @@ function switchTab(tabId) {
 }
 
 function setupEventListeners() {
-  document.getElementById('btnGlobalRefresh')?.addEventListener('click', () => {
+  (document.getElementById('btnGlobalRefresh') || document.getElementById('btn-refresh-list'))?.addEventListener('click', () => {
     refreshAllStudioData();
     showToast('🔄 Đã làm mới toàn bộ dữ liệu Studio!');
   });
 
   // Style Preset Cards
-  const styleCards = document.querySelectorAll('#styleCardsGrid .style-card');
+  const styleCards = document.querySelectorAll('#vgStyleCards .style-card, #styleCardsGrid .style-card, .style-cards-grid .style-card');
   styleCards.forEach(card => {
     card.addEventListener('click', () => {
       styleCards.forEach(c => c.classList.remove('active'));
       card.classList.add('active');
-      const kind = card.getAttribute('data-kind');
+      const kind = card.getAttribute('data-style') || card.getAttribute('data-kind');
       const layout = card.getAttribute('data-layout');
       const ratio = card.getAttribute('data-ratio');
-      document.getElementById('vgKind').value = kind;
-      if (layout) document.getElementById('vgLayoutMode').value = layout;
-      if (ratio) document.getElementById('vgAspectRatio').value = ratio;
+      const kindEl = document.getElementById('vgKind');
+      if (kindEl && kind) kindEl.value = kind;
+      if (layout) {
+        const layoutEl = document.getElementById('vgLayoutMode');
+        if (layoutEl) layoutEl.value = layout;
+      }
+      if (ratio) {
+        const ratioEl = document.getElementById('vgAspectRatio');
+        if (ratioEl) ratioEl.value = ratio;
+      }
       const badge = document.getElementById('selectedStyleBadge');
-      if (badge) badge.innerText = card.querySelector('strong')?.innerText || kind;
+      if (badge) badge.innerText = card.querySelector('strong, h4')?.innerText || kind;
+    });
+  });
+
+  // Keep dropdown and style cards in sync
+  document.getElementById('vgKind')?.addEventListener('change', (e) => {
+    const selectedKind = e.target.value;
+    styleCards.forEach(c => {
+      const s = c.getAttribute('data-style') || c.getAttribute('data-kind');
+      c.classList.toggle('active', s === selectedKind);
     });
   });
 
   // Single vs Batch mode
-  document.getElementById('modeSingleBtn')?.addEventListener('click', () => {
+  const btnSingle = document.getElementById('vgModeSingle') || document.getElementById('modeSingleBtn');
+  const btnBatch = document.getElementById('vgModeBatchLines') || document.getElementById('modeBatchBtn');
+  const scriptInput = document.getElementById('vgScriptInput');
+
+  btnSingle?.addEventListener('click', () => {
     vgInputMode = 'single';
-    document.getElementById('modeSingleBtn').classList.add('active');
-    document.getElementById('modeBatchBtn').classList.remove('active');
-    document.getElementById('singleScriptWrap').hidden = false;
-    document.getElementById('batchScriptWrap').hidden = true;
+    btnSingle.classList.add('active');
+    btnBatch?.classList.remove('active');
+    const singleWrap = document.getElementById('singleScriptWrap');
+    const batchWrap = document.getElementById('batchScriptWrap');
+    if (singleWrap) singleWrap.hidden = false;
+    if (batchWrap) batchWrap.hidden = true;
+    if (scriptInput) {
+      scriptInput.placeholder = 'Nhập kịch bản tiếng Việt (VD: Có một kiểu người, dù bạn nói gì đi nữa, phản xạ đầu tiên là cãi lại...)';
+    }
   });
 
-  document.getElementById('modeBatchBtn')?.addEventListener('click', () => {
+  btnBatch?.addEventListener('click', () => {
     vgInputMode = 'batch';
-    document.getElementById('modeBatchBtn').classList.add('active');
-    document.getElementById('modeSingleBtn').classList.remove('active');
-    document.getElementById('singleScriptWrap').hidden = true;
-    document.getElementById('batchScriptWrap').hidden = false;
+    btnBatch.classList.add('active');
+    btnSingle?.classList.remove('active');
+    const singleWrap = document.getElementById('singleScriptWrap');
+    const batchWrap = document.getElementById('batchScriptWrap');
+    if (singleWrap) singleWrap.hidden = true;
+    if (batchWrap) batchWrap.hidden = false;
+    if (scriptInput) {
+      scriptInput.placeholder = 'Nhập danh sách kịch bản / prompt (Mỗi dòng 1 video ngắn)...';
+    }
   });
 
   // Sample Psychology script button
   document.getElementById('btnFillSamplePsych')?.addEventListener('click', () => {
-    document.getElementById('vgChannelName').value = 'LÀNH TÂM';
-    document.getElementById('vgTitle').value = 'TÍNH CÁCH PHẢN BÁC';
-    document.getElementById('vgLessonText').value = 'Nhận diện cơ chế phòng vệ tâm lý để giao tiếp lành mạnh hơn.';
-    document.getElementById('vgLayoutMode').value = 'split';
-    document.getElementById('vgScriptInput').value =
-      'Trong cuộc sống có một kiểu người luôn thích mở miệng bằng hai chữ: Không phải. ' +
-      'Bạn nói hôm nay trời đẹp, họ liền đáp nắng thế này mà đẹp gì, tia cực tím mạnh lắm. ' +
-      'Trong tâm lý học, đây gọi là tính cách phản bác thường trực (Habitual Contradiction). ' +
-      'Họ dùng sự phủ định người khác như một chiếc khiên vô hình để che giấu sự bất an và khẳng định quyền kiểm soát.';
+    const channelEl = document.getElementById('vgChannelName');
+    if (channelEl) channelEl.value = 'LÀNH TÂM';
+    const titleEl = document.getElementById('vgTitle');
+    if (titleEl) titleEl.value = 'TÍNH CÁCH PHẢN BÁC';
+    const lessonEl = document.getElementById('vgLessonText');
+    if (lessonEl) lessonEl.value = 'Nhận diện cơ chế phòng vệ tâm lý để giao tiếp lành mạnh hơn.';
+    const layoutEl = document.getElementById('vgLayoutMode');
+    if (layoutEl) layoutEl.value = 'split';
+    const kindEl = document.getElementById('vgKind');
+    if (kindEl) {
+      kindEl.value = 'psych_split';
+      kindEl.dispatchEvent(new Event('change'));
+    }
+    if (scriptInput) {
+      scriptInput.value =
+        'Trong cuộc sống có một kiểu người luôn thích mở miệng bằng hai chữ: Không phải. ' +
+        'Bạn nói hôm nay trời đẹp, họ liền đáp nắng thế này mà đẹp gì, tia cực tím mạnh lắm. ' +
+        'Trong tâm lý học, đây gọi là tính cách phản bác thường trực (Habitual Contradiction). ' +
+        'Họ dùng sự phủ định người khác như một chiếc khiên vô hình để che giấu sự bất an và khẳng định quyền kiểm soát.';
+    }
     showToast('✨ Đã điền mẫu kịch bản Lành Tâm (Tính Cách Phản Bác)!');
   });
 
   // Upload .txt batch file
-  document.getElementById('vgTxtFileInput')?.addEventListener('change', async (e) => {
+  (document.getElementById('vgTxtFile') || document.getElementById('vgTxtFileInput'))?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    document.getElementById('modeBatchBtn')?.click();
-    document.getElementById('vgBatchPromptsInput').value = text;
+    btnBatch?.click();
+    const batchInput = document.getElementById('vgBatchPromptsInput') || document.getElementById('vgScriptInput');
+    if (batchInput) batchInput.value = text;
     showToast(`📂 Đã nạp file ${file.name}`);
   });
 
@@ -191,17 +235,17 @@ function setupEventListeners() {
   document.getElementById('vgAddBatchBtn')?.addEventListener('click', vgAddBatchToQueue);
   document.getElementById('vgInstantRenderBtn')?.addEventListener('click', vgInstantRenderCurrent);
   document.getElementById('vgGenerateBtn')?.addEventListener('click', vgGenerateAndRender);
-  document.getElementById('vgRenderOnlyProjectBtn')?.addEventListener('click', () => {
+  (document.getElementById('vgRenderOnlyBtn') || document.getElementById('vgRenderOnlyProjectBtn'))?.addEventListener('click', () => {
     if (vgCurrentProjectId) vgRenderOnlyById(vgCurrentProjectId);
   });
-  document.getElementById('vgSendToRemakeBtn')?.addEventListener('click', () => {
+  (document.getElementById('vgSendRemakeBtn') || document.getElementById('vgSendToRemakeBtn'))?.addEventListener('click', () => {
     if (vgCurrentProjectId) vgSendToRemake(vgCurrentProjectId);
   });
   document.getElementById('vgPublishBtn')?.addEventListener('click', vgPublishToTikTok);
 
   // Queue controls
-  document.getElementById('vgSelectAllQueue')?.addEventListener('change', (e) => {
-    document.querySelectorAll('.vg-queue-check').forEach(chk => {
+  (document.getElementById('vgSelectAll') || document.getElementById('vgSelectAllQueue'))?.addEventListener('change', (e) => {
+    document.querySelectorAll('.vg-queue-check, #vgQueueRows input[type="checkbox"]').forEach(chk => {
       chk.checked = e.target.checked;
     });
   });
@@ -215,35 +259,39 @@ function setupEventListeners() {
 
   // Film Studio Listeners
   document.getElementById('btnCreateFilmProject')?.addEventListener('click', createFilmProjectHandler);
-  document.getElementById('filmAssetRefInput')?.addEventListener('change', handleFilmAssetFileSelect);
-  document.getElementById('btnSaveFilmAsset')?.addEventListener('click', saveFilmAssetHandler);
-  document.getElementById('btnSaveFilmRules')?.addEventListener('click', saveFilmRulesHandler);
+  (document.getElementById('filmAssetFile') || document.getElementById('filmAssetRefInput'))?.addEventListener('change', handleFilmAssetFileSelect);
+  (document.getElementById('btnAddFilmAsset') || document.getElementById('btnSaveFilmAsset'))?.addEventListener('click', saveFilmAssetHandler);
+  (document.getElementById('btnSaveFilmGlobalRules') || document.getElementById('btnSaveFilmRules'))?.addEventListener('click', saveFilmRulesHandler);
   document.getElementById('btnAddFilmSceneRule')?.addEventListener('click', addFilmSceneRuleHandler);
-  document.getElementById('btnFilmAddQueue')?.addEventListener('click', addFilmScenesToQueueHandler);
+  (document.getElementById('btnAddFilmScenesToQueue') || document.getElementById('btnFilmAddQueue'))?.addEventListener('click', addFilmScenesToQueueHandler);
 
   // Prompt Writer Listeners
   document.getElementById('pwTabSingle')?.addEventListener('click', () => {
     pwState.mode = 'single';
     document.getElementById('pwTabSingle').classList.add('active');
-    document.getElementById('pwTabBulk').classList.remove('active');
-    document.getElementById('pwSingleBox').hidden = false;
-    document.getElementById('pwBulkBox').hidden = true;
+    document.getElementById('pwTabBulk')?.classList.remove('active');
+    const singleBox = document.getElementById('pwSingleBox');
+    const bulkBox = document.getElementById('pwBulkBox');
+    if (singleBox) singleBox.hidden = false;
+    if (bulkBox) bulkBox.hidden = true;
   });
   document.getElementById('pwTabBulk')?.addEventListener('click', () => {
     pwState.mode = 'bulk';
     document.getElementById('pwTabBulk').classList.add('active');
-    document.getElementById('pwTabSingle').classList.remove('active');
-    document.getElementById('pwSingleBox').hidden = true;
-    document.getElementById('pwBulkBox').hidden = false;
+    document.getElementById('pwTabSingle')?.classList.remove('active');
+    const singleBox = document.getElementById('pwSingleBox');
+    const bulkBox = document.getElementById('pwBulkBox');
+    if (singleBox) singleBox.hidden = true;
+    if (bulkBox) bulkBox.hidden = false;
   });
-  document.getElementById('btnRunPromptWriter')?.addEventListener('click', runPromptWriterHandler);
-  document.getElementById('btnSendPromptsToVg')?.addEventListener('click', sendPromptsToVideoGen);
+  (document.getElementById('btnPwGenerateSingle') || document.getElementById('btnRunPromptWriter'))?.addEventListener('click', runPromptWriterHandler);
+  (document.getElementById('btnPwSendToVideo') || document.getElementById('btnSendPromptsToVg'))?.addEventListener('click', sendPromptsToVideoGen);
   document.getElementById('btnSavePwProfile')?.addEventListener('click', savePwProfileHandler);
   document.getElementById('btnSavePwSkill')?.addEventListener('click', savePwSkillHandler);
 
   // Accounts & Proxy Pool Listeners
   document.getElementById('btnAddAccount')?.addEventListener('click', addAccountHandler);
-  document.getElementById('btnAssignProxies')?.addEventListener('click', assignBulkProxiesHandler);
+  (document.getElementById('btnAssignBulkProxies') || document.getElementById('btnAssignProxies'))?.addEventListener('click', assignBulkProxiesHandler);
   document.getElementById('btnRefreshAccounts')?.addEventListener('click', loadAccounts);
 
   // Unified Library Listeners
@@ -255,7 +303,7 @@ function setupEventListeners() {
       renderUnifiedLibrary();
     });
   });
-  document.getElementById('btnRefreshLibrary')?.addEventListener('click', loadUnifiedLibrary);
+  (document.getElementById('btnRefreshLibrary') || document.getElementById('btn-refresh-list'))?.addEventListener('click', loadUnifiedLibrary);
 
   // Existing Douyin / Remake / MinIO / Autopilot Listeners
   document.getElementById('btn-refresh-list')?.addEventListener('click', loadVideos);
@@ -335,27 +383,39 @@ function removeVgRef(idx) {
 }
 
 function getVgCommonPayload() {
+  const kindEl = document.getElementById('vgKind');
+  const layoutEl = document.getElementById('vgLayoutMode');
+  const ratioEl = document.getElementById('vgAspectRatio');
+  const durationEl = document.getElementById('vgDuration') || document.getElementById('vgTargetDuration');
+  const continuityEl = document.getElementById('filmContinuityOffset') || document.getElementById('vgContinuityOffset');
+  const channelEl = document.getElementById('vgChannelName');
+  const titleEl = document.getElementById('vgTitle');
+  const lessonEl = document.getElementById('vgLessonText');
+  const projectEl = document.getElementById('vgFilmProjectSelect');
+
   return {
-    kind: document.getElementById('vgKind').value,
-    layoutMode: document.getElementById('vgLayoutMode').value,
-    aspectRatio: document.getElementById('vgAspectRatio').value,
-    targetDuration: Number(document.getElementById('vgTargetDuration').value) || 15,
-    continuityOffset: Number(document.getElementById('vgContinuityOffset').value) || 0.8,
-    channelName: document.getElementById('vgChannelName').value.trim() || 'LÀNH TÂM',
-    title: document.getElementById('vgTitle').value.trim() || 'TÍNH CÁCH PHẢN BÁC',
-    lessonText: document.getElementById('vgLessonText').value.trim(),
-    projectId: document.getElementById('vgFilmProjectSelect').value || null,
-    refs: vgUploadedRefs.map(r => r.path)
+    kind: kindEl?.value || 'psych_split',
+    layoutMode: layoutEl?.value || 'split',
+    aspectRatio: ratioEl?.value || '9:16',
+    targetDuration: Number(durationEl?.value) || 30,
+    continuityOffset: Number(continuityEl?.value) || 0.3,
+    channelName: channelEl?.value?.trim() || 'LÀNH TÂM',
+    title: titleEl?.value?.trim() || 'TÍNH CÁCH PHẢN BÁC',
+    lessonText: lessonEl?.value?.trim() || '',
+    projectId: projectEl?.value || null,
+    refs: (vgUploadedRefs || []).map(r => r.ref || r.path || r.url).filter(Boolean)
   };
 }
 
 async function vgPlanScenes() {
-  const rawScript = document.getElementById('vgScriptInput').value.trim();
+  const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
   if (!rawScript) return alert('Vui lòng nhập kịch bản!');
 
   const btn = document.getElementById('vgPlanBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang chia Scene & phụ đề song ngữ...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang chia Scene & phụ đề song ngữ...';
+  }
 
   try {
     const payload = { ...getVgCommonPayload(), rawScript };
@@ -368,27 +428,32 @@ async function vgPlanScenes() {
     if (!json.success) throw new Error(json.error);
 
     vgCurrentProjectId = json.data.id;
-    document.getElementById('vgProjectView').hidden = false;
+    const projView = document.getElementById('vgProjectView');
+    if (projView) projView.hidden = false;
     vgRenderProject(json.data);
     await loadVgQueue();
-    showToast(`🎬 Đã chia ${json.data.scenes.length} phân cảnh song ngữ!`);
+    showToast(`🎬 Đã chia ${(json.data.scenes || []).length} phân cảnh song ngữ!`);
   } catch (err) {
     alert('Lỗi: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.innerText = '🎬 1. Chia Scene (Director)';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🎬 Chia Scene Chi Tiết';
+    }
   }
 }
 
 async function vgInstantRenderCurrent() {
-  const rawScript = document.getElementById('vgScriptInput').value.trim();
+  const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
   if (!rawScript && !vgCurrentProjectId) {
     return alert('Vui lòng nhập kịch bản trước khi Render Nhanh!');
   }
 
   const btn = document.getElementById('vgInstantRenderBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang tạo giọng đọc TTS + Render Remotion...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang tạo giọng đọc TTS + Render Remotion...';
+  }
 
   try {
     if (!vgCurrentProjectId || rawScript) {
@@ -400,7 +465,8 @@ async function vgInstantRenderCurrent() {
       const planJson = await planRes.json();
       if (!planJson.success) throw new Error(planJson.error);
       vgCurrentProjectId = planJson.data.id;
-      document.getElementById('vgProjectView').hidden = false;
+      const projView = document.getElementById('vgProjectView');
+      if (projView) projView.hidden = false;
       vgRenderProject(planJson.data);
     }
 
@@ -408,8 +474,10 @@ async function vgInstantRenderCurrent() {
   } catch (err) {
     alert('Lỗi Render Nhanh: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.innerText = '⚡ 3. Render Nhanh Remotion (Không cần chờ Veo)';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '⚡ Tạo & Render Nhanh Ngay Bằng Remotion (Có Giọng Đọc + Phụ Đề Song Ngữ)';
+    }
   }
 }
 
@@ -420,7 +488,8 @@ async function vgRenderOnlyById(projectId) {
   if (!json.success) throw new Error(json.error);
 
   vgCurrentProjectId = projectId;
-  document.getElementById('vgProjectView').hidden = false;
+  const projView = document.getElementById('vgProjectView');
+  if (projView) projView.hidden = false;
   vgRenderProject(json.data);
   await loadVgQueue();
   await loadUnifiedLibrary();
@@ -432,25 +501,25 @@ async function vgAddBatchToQueue() {
   let items = [];
 
   if (vgInputMode === 'batch') {
-    const rawLines = document.getElementById('vgBatchPromptsInput').value
-      .split(/\r?\n/)
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (rawLines.length === 0) return alert('Vui lòng nhập ít nhất 1 dòng prompt trong ô Hàng loạt!');
+    const rawText = (document.getElementById('vgBatchPromptsInput')?.value || document.getElementById('vgScriptInput')?.value || '').trim();
+    const rawLines = rawText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    if (rawLines.length === 0) return alert('Vui lòng nhập ít nhất 1 dòng prompt/kịch bản!');
     items = rawLines.map((line, i) => ({
       title: `${common.title} #${i + 1}`,
       rawScript: line,
       sceneNo: i + 1
     }));
   } else {
-    const rawScript = document.getElementById('vgScriptInput').value.trim();
+    const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
     if (!rawScript) return alert('Vui lòng nhập kịch bản!');
     items = [{ title: common.title, rawScript, sceneNo: 1 }];
   }
 
   const btn = document.getElementById('vgAddBatchBtn');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang thêm vào hàng đợi...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang thêm vào hàng đợi...';
+  }
 
   try {
     const res = await fetch('/api/video-gen/batches', {
@@ -470,39 +539,52 @@ async function vgAddBatchToQueue() {
   } catch (err) {
     alert('Lỗi thêm hàng đợi: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.innerText = '📥 2. Thêm Vào Hàng Đợi Batch';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '＋ Thêm Vào Hàng Đợi';
+    }
   }
 }
 
 function vgRenderProject(project) {
   const grid = document.getElementById('vgSceneGrid');
-  document.getElementById('vgSceneCountBadge').innerText = `${(project.scenes || []).length} cảnh`;
+  const countBadge = document.getElementById('vgSceneCountBadge');
+  if (countBadge) countBadge.innerText = `${(project.scenes || []).length} cảnh`;
+  const titleEl = document.getElementById('vgActiveProjectTitle');
+  if (titleEl) titleEl.innerText = `Chi tiết phân cảnh (${(project.scenes || []).length} cảnh - ${project.title || ''})`;
 
-  grid.innerHTML = (project.scenes || []).map((scene, idx) => `
-    <div class="vf-scene-card">
-      <div class="vf-scene-status">
-        <span>Cảnh #${idx + 1} (${escapeHtml(scene.visualMode || scene.type)})</span>
-        <span>${escapeHtml(scene.mediaStatus || 'pending')}</span>
+  if (grid) {
+    grid.innerHTML = (project.scenes || []).map((scene, idx) => `
+      <div class="vf-scene-card">
+        <div class="vf-scene-status">
+          <span>Cảnh #${idx + 1} (${escapeHtml(scene.visualMode || scene.type)})</span>
+          <span>${escapeHtml(scene.mediaStatus || 'pending')}</span>
+        </div>
+        ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split(/[\\/]/).pop())}" controls muted></video>` : ''}
+        <p style="color: #f8fafc; font-weight: 600;">🇻🇳 ${escapeHtml(scene.text)}</p>
+        ${scene.textEn ? `<p style="font-size: 11.5px; color: #94a3b8;">🇬🇧 ${escapeHtml(scene.textEn)}</p>` : ''}
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại Media</button>
+        </div>
       </div>
-      ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split(/[\\/]/).pop())}" controls muted></video>` : ''}
-      <p style="color: #f8fafc; font-weight: 600;">🇻🇳 ${escapeHtml(scene.text)}</p>
-      ${scene.textEn ? `<p style="font-size: 11.5px; color: #94a3b8;">🇬🇧 ${escapeHtml(scene.textEn)}</p>` : ''}
-      <div style="display:flex; gap:6px; margin-top:6px;">
-        <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại Media</button>
-      </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
-  document.getElementById('vgGenerateBtn').hidden = false;
-  document.getElementById('vgRenderOnlyProjectBtn').hidden = false;
+  const genBtn = document.getElementById('vgGenerateBtn');
+  if (genBtn) genBtn.hidden = false;
+  const renderBtn = document.getElementById('vgRenderOnlyBtn') || document.getElementById('vgRenderOnlyProjectBtn');
+  if (renderBtn) renderBtn.hidden = false;
 
   if (project.status === 'done' && project.outputPath) {
     const video = document.getElementById('vgFinalVideo');
-    video.src = `/storage/video-gen/${project.id}/output.mp4?t=${Date.now()}`;
-    video.hidden = false;
-    document.getElementById('vgPublishBox').hidden = false;
-    document.getElementById('vgSendToRemakeBtn').hidden = false;
+    if (video) {
+      video.src = `/storage/video-gen/${project.id}/output.mp4?t=${Date.now()}`;
+      video.hidden = false;
+    }
+    const pubBox = document.getElementById('vgPublishBox');
+    if (pubBox) pubBox.hidden = false;
+    const sendRemakeBtn = document.getElementById('vgSendRemakeBtn') || document.getElementById('vgSendToRemakeBtn');
+    if (sendRemakeBtn) sendRemakeBtn.hidden = false;
   }
 }
 
@@ -600,7 +682,8 @@ async function loadVgQueue() {
 
 function renderVgQueueTable() {
   const tbody = document.getElementById('vgQueueRows');
-  document.getElementById('vgQueueTotalBadge').innerText = `${vgQueueData.length} tác vụ`;
+  const countBadge = document.getElementById('vgQueueCountBadge') || document.getElementById('vgQueueTotalBadge');
+  if (countBadge) countBadge.innerText = `${vgQueueData.length}`;
   if (!tbody) return;
 
   if (vgQueueData.length === 0) {
@@ -654,7 +737,8 @@ function inspectQueueItem(id) {
   const item = vgQueueData.find(x => x.id === id);
   if (!item) return;
   vgCurrentProjectId = item.id;
-  document.getElementById('vgProjectView').hidden = false;
+  const projView = document.getElementById('vgProjectView');
+  if (projView) projView.hidden = false;
   vgRenderProject(item);
 }
 
@@ -710,11 +794,22 @@ function updateTopStats() {
   const done = vgQueueData.filter(x => x.status === 'done').length;
   const running = vgQueueData.filter(x => ['planning', 'generating', 'rendering'].includes(x.status)).length;
   const queued = vgQueueData.filter(x => ['planned', 'queued'].includes(x.status)).length;
+  const failed = vgQueueData.filter(x => x.status === 'failed' || x.status === 'error').length;
 
-  document.getElementById('statQueueTotal').innerText = total;
-  document.getElementById('statRunning').innerText = running;
-  document.getElementById('statDone').innerText = done;
-  document.getElementById('statQueued').innerText = queued;
+  const safeSet = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = val;
+  };
+
+  safeSet('stat-vg-total', total);
+  safeSet('stat-vg-queued', queued + running);
+  safeSet('stat-vg-done', done);
+  safeSet('stat-vg-failed', failed);
+
+  safeSet('statQueueTotal', total);
+  safeSet('statRunning', running);
+  safeSet('statDone', done);
+  safeSet('statQueued', queued);
 }
 
 // ============================================================================
@@ -726,7 +821,7 @@ async function loadFilmProjects() {
     const res = await fetch('/api/film-projects');
     const json = await res.json();
     if (!json.success) return;
-    filmProjects = json.data || [];
+    filmProjects = json.projects || json.data || [];
     renderFilmProjectsList();
     populateVgFilmSelect();
   } catch (e) {
@@ -744,7 +839,7 @@ function populateVgFilmSelect() {
 }
 
 function renderFilmProjectsList() {
-  const grid = document.getElementById('filmProjectsList');
+  const grid = document.getElementById('filmFoldersGrid') || document.getElementById('filmProjectsList');
   if (!grid) return;
   if (filmProjects.length === 0) {
     grid.innerHTML = `<div style="color:var(--text-muted); padding:12px;">Chưa có dự án phim nào. Hãy tạo thư mục dự án ở trên!</div>`;
@@ -765,8 +860,8 @@ function renderFilmProjectsList() {
 }
 
 async function createFilmProjectHandler() {
-  const input = document.getElementById('filmNewTitleInput');
-  const title = input.value.trim();
+  const input = document.getElementById('filmNewName') || document.getElementById('filmNewTitleInput');
+  const title = input?.value?.trim();
   if (!title) return alert('Vui lòng nhập tên dự án phim!');
 
   const res = await fetch('/api/film-projects', {
@@ -777,7 +872,7 @@ async function createFilmProjectHandler() {
   const json = await res.json();
   if (!json.success) return alert(json.error);
 
-  input.value = '';
+  if (input) input.value = '';
   activeFilmProjectId = json.data.id;
   await loadFilmProjects();
   selectFilmProject(activeFilmProjectId);
@@ -789,7 +884,8 @@ async function deleteFilmProject(id) {
   await fetch(`/api/film-projects/${id}`, { method: 'DELETE' });
   if (activeFilmProjectId === id) {
     activeFilmProjectId = null;
-    document.getElementById('filmWorkspaceCard').hidden = true;
+    const ws = document.getElementById('filmActiveWorkspace') || document.getElementById('filmWorkspaceCard');
+    if (ws) ws.hidden = true;
   }
   await loadFilmProjects();
 }
@@ -800,34 +896,42 @@ function selectFilmProject(id) {
   activeFilmProjectId = id;
   renderFilmProjectsList();
 
-  document.getElementById('filmWorkspaceCard').hidden = false;
-  document.getElementById('filmActiveTitle').innerText = `Dự Án: ${proj.title}`;
-  document.getElementById('filmActiveIdBadge').innerText = proj.id;
-  document.getElementById('filmGlobalRuleInput').value = proj.globalRules || '';
+  const ws = document.getElementById('filmActiveWorkspace') || document.getElementById('filmWorkspaceCard');
+  if (ws) ws.hidden = false;
+  const titleEl = document.getElementById('filmActiveTitle');
+  if (titleEl) titleEl.innerText = `Dự Án: ${proj.title}`;
+  const badgeEl = document.getElementById('filmActiveIdBadge');
+  if (badgeEl) badgeEl.innerText = proj.id;
+  const ruleEl = document.getElementById('filmGlobalRules') || document.getElementById('filmGlobalRuleInput');
+  if (ruleEl) ruleEl.value = proj.globalRules || '';
 
   const assetsList = document.getElementById('filmAssetsList');
-  assetsList.innerHTML = (proj.assets || []).map(a => `
-    <div class="film-asset-row">
-      <div style="display:flex; align-items:center; gap:10px;">
-        ${a.refs?.[0] ? `<img src="/storage/uploads/${escapeHtml(a.refs[0].split(/[\\/]/).pop())}" alt="">` : ''}
-        <div>
-          <strong>[${escapeHtml(a.kind.toUpperCase())}] ${escapeHtml(a.name)}</strong>
-          <div style="font-size:11px; color:var(--text-muted);">Cảnh ${a.sceneStart} → ${a.sceneEnd} • ${escapeHtml(a.note || '')}</div>
+  if (assetsList) {
+    assetsList.innerHTML = (proj.assets || []).map(a => `
+      <div class="film-asset-row">
+        <div style="display:flex; align-items:center; gap:10px;">
+          ${a.refs?.[0] ? `<img src="/storage/uploads/${escapeHtml(a.refs[0].split(/[\\/]/).pop())}" alt="">` : ''}
+          <div>
+            <strong>[${escapeHtml((a.kind || a.role || '').toUpperCase())}] ${escapeHtml(a.name)}</strong>
+            <div style="font-size:11px; color:var(--text-muted);">Cảnh ${a.sceneStart} → ${a.sceneEnd} • ${escapeHtml(a.note || a.desc || '')}</div>
+          </div>
         </div>
+        <button class="btn btn-secondary btn-sm" style="color:#f87171;" onclick="deleteFilmAsset('${proj.id}', '${a.id}')">✕</button>
       </div>
-      <button class="btn btn-secondary btn-sm" style="color:#f87171;" onclick="deleteFilmAsset('${proj.id}', '${a.id}')">✕</button>
-    </div>
-  `).join('');
+    `).join('');
+  }
 
   const rulesList = document.getElementById('filmSceneRulesList');
-  rulesList.innerHTML = (proj.sceneRules || []).map(r => `
-    <div class="film-asset-row">
-      <div>
-        <strong>Cảnh ${r.sceneStart} → ${r.sceneEnd}</strong>
-        <div style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(r.rulePrompt)}</div>
+  if (rulesList) {
+    rulesList.innerHTML = (proj.sceneRules || []).map(r => `
+      <div class="film-asset-row">
+        <div>
+          <strong>Cảnh ${r.sceneStart} → ${r.sceneEnd}</strong>
+          <div style="font-size:11.5px; color:var(--text-muted);">${escapeHtml(r.rulePrompt || r.ruleText || '')}</div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
 }
 
 async function handleFilmAssetFileSelect(e) {
@@ -837,20 +941,28 @@ async function handleFilmAssetFileSelect(e) {
     const dataUrl = await fileToDataUrl(f);
     filmPendingRefBase64.push({ name: f.name, dataUrl });
   }
+  const fileNameBadge = document.getElementById('filmAssetFileName');
+  if (fileNameBadge) fileNameBadge.innerText = `${filmPendingRefBase64.length} file`;
   showToast(`📎 Đã chọn ${filmPendingRefBase64.length} ảnh cho nhân vật/bối cảnh`);
 }
 
 async function saveFilmAssetHandler() {
   if (!activeFilmProjectId) return;
-  const name = document.getElementById('filmAssetName').value.trim();
+  const nameEl = document.getElementById('filmAssetName');
+  const name = nameEl?.value?.trim();
   if (!name) return alert('Vui lòng nhập tên nhân vật/bối cảnh!');
 
+  const kindEl = document.getElementById('filmAssetRole') || document.getElementById('filmAssetKind');
+  const noteEl = document.getElementById('filmAssetDesc') || document.getElementById('filmAssetNote');
+  const startEl = document.getElementById('filmAssetStart');
+  const endEl = document.getElementById('filmAssetEnd');
+
   const item = {
-    kind: document.getElementById('filmAssetKind').value,
+    kind: kindEl?.value || 'character',
     name,
-    sceneStart: Number(document.getElementById('filmAssetStart').value) || 1,
-    sceneEnd: Number(document.getElementById('filmAssetEnd').value) || 99,
-    note: document.getElementById('filmAssetNote').value.trim(),
+    sceneStart: Number(startEl?.value) || 1,
+    sceneEnd: Number(endEl?.value) || 99,
+    note: noteEl?.value?.trim() || '',
     base64Files: filmPendingRefBase64
   };
 
@@ -862,8 +974,8 @@ async function saveFilmAssetHandler() {
   const json = await res.json();
   if (!json.success) return alert(json.error);
 
-  document.getElementById('filmAssetName').value = '';
-  document.getElementById('filmAssetNote').value = '';
+  if (nameEl) nameEl.value = '';
+  if (noteEl) noteEl.value = '';
   filmPendingRefBase64 = [];
   await loadFilmProjects();
   selectFilmProject(activeFilmProjectId);
@@ -878,7 +990,8 @@ async function deleteFilmAsset(projectId, assetId) {
 
 async function saveFilmRulesHandler() {
   if (!activeFilmProjectId) return;
-  const globalRules = document.getElementById('filmGlobalRuleInput').value.trim();
+  const globalEl = document.getElementById('filmGlobalRules') || document.getElementById('filmGlobalRuleInput');
+  const globalRules = (globalEl?.value || '').trim();
   await fetch(`/api/film-projects/${activeFilmProjectId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -891,12 +1004,16 @@ async function saveFilmRulesHandler() {
 async function addFilmSceneRuleHandler() {
   if (!activeFilmProjectId) return;
   const proj = filmProjects.find(p => p.id === activeFilmProjectId);
-  const rulePrompt = document.getElementById('filmRulePrompt').value.trim();
+  const ruleEl = document.getElementById('filmRuleText') || document.getElementById('filmRulePrompt');
+  const rulePrompt = (ruleEl?.value || '').trim();
   if (!rulePrompt) return;
 
+  const startEl = document.getElementById('filmRuleStart');
+  const endEl = document.getElementById('filmRuleEnd');
+
   const rules = [...(proj.sceneRules || []), {
-    sceneStart: Number(document.getElementById('filmRuleStart').value) || 1,
-    sceneEnd: Number(document.getElementById('filmRuleEnd').value) || 5,
+    sceneStart: Number(startEl?.value) || 1,
+    sceneEnd: Number(endEl?.value) || 5,
     rulePrompt
   }];
 
@@ -905,7 +1022,7 @@ async function addFilmSceneRuleHandler() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rules })
   });
-  document.getElementById('filmRulePrompt').value = '';
+  if (ruleEl) ruleEl.value = '';
   await loadFilmProjects();
   selectFilmProject(activeFilmProjectId);
 }
@@ -913,7 +1030,8 @@ async function addFilmSceneRuleHandler() {
 async function addFilmScenesToQueueHandler() {
   if (!activeFilmProjectId) return;
   const proj = filmProjects.find(p => p.id === activeFilmProjectId);
-  const lines = document.getElementById('filmScenesBatchInput').value
+  const promptsEl = document.getElementById('filmBatchPrompts') || document.getElementById('filmScenesBatchInput');
+  const lines = (promptsEl?.value || '')
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
@@ -925,14 +1043,17 @@ async function addFilmScenesToQueueHandler() {
     sceneNo: idx + 1
   }));
 
+  const chainEl = document.getElementById('filmChainMode') || document.getElementById('filmAutoContinuity');
+  const offsetEl = document.getElementById('filmContinuityOffset');
+
   const res = await fetch('/api/video-gen/batches', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       kind: proj.defaultStyle || 'cinematic',
       projectId: proj.id,
-      chainContinuity: document.getElementById('filmAutoContinuity').checked,
-      continuityOffset: Number(document.getElementById('filmContinuityOffset').value) || 0.8,
+      chainContinuity: chainEl ? (chainEl.value === 'chain' || chainEl.checked !== false) : true,
+      continuityOffset: Number(offsetEl?.value) || 0.8,
       items
     })
   });
@@ -953,8 +1074,9 @@ async function loadPromptWriterConfig() {
     const res = await fetch('/api/prompt-writer');
     const json = await res.json();
     if (!json.success) return;
-    pwState.skills = json.data.skills || [];
-    pwState.profiles = json.data.profiles || [];
+    const data = json.data || json;
+    pwState.skills = data.skills || [];
+    pwState.profiles = data.profiles || [];
 
     const skillSel = document.getElementById('pwSkillSelect');
     if (skillSel) {
@@ -975,17 +1097,23 @@ async function loadPromptWriterConfig() {
 }
 
 async function runPromptWriterHandler() {
-  const btn = document.getElementById('btnRunPromptWriter');
-  btn.disabled = true;
-  btn.innerText = '⏳ Đang viết Prompt bằng AI...';
+  const btn = document.getElementById('btnPwGenerateSingle') || document.getElementById('btnRunPromptWriter');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang viết Prompt bằng AI...';
+  }
 
   try {
-    const skillId = document.getElementById('pwSkillSelect').value;
-    const profileId = document.getElementById('pwProfileSelect').value;
+    const skillSel = document.getElementById('pwSkillSelect');
+    const profSel = document.getElementById('pwProfileSelect');
+    const skillId = skillSel?.value;
+    const profileId = profSel?.value;
 
     if (pwState.mode === 'single') {
-      const idea = document.getElementById('pwSingleIdea').value.trim();
+      const ideaEl = document.getElementById('pwBriefInput') || document.getElementById('pwSingleIdea');
+      const idea = (ideaEl?.value || '').trim();
       if (!idea) throw new Error('Vui lòng nhập ý tưởng!');
+      const ctxEl = document.getElementById('pwSingleContext');
       const res = await fetch('/api/prompt-writer/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -993,18 +1121,21 @@ async function runPromptWriterHandler() {
           skillId,
           profileId,
           idea,
-          context: document.getElementById('pwSingleContext').value.trim()
+          context: (ctxEl?.value || '').trim()
         })
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
 
       pwState.lastPrompts = [json.data.prompt];
-      document.getElementById('pwResultCard').hidden = false;
-      document.getElementById('pwResultOutput').value = json.data.prompt;
+      const resCard = document.getElementById('pwResultCard');
+      if (resCard) resCard.hidden = false;
+      const resOut = document.getElementById('pwSingleOutput') || document.getElementById('pwResultOutput');
+      if (resOut) resOut.value = json.data.prompt;
     } else {
-      const rawIdeas = document.getElementById('pwBulkIdeas').value.trim();
+      const rawIdeas = (document.getElementById('pwBulkBrief')?.value || document.getElementById('pwBulkIdeas')?.value || '').trim();
       if (!rawIdeas) throw new Error('Vui lòng nhập danh sách ý tưởng!');
+      const varCount = Number(document.getElementById('pwBulkCount')?.value || document.getElementById('pwVariationCount')?.value) || 2;
       const res = await fetch('/api/prompt-writer/generate-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1012,7 +1143,7 @@ async function runPromptWriterHandler() {
           skillId,
           profileId,
           rawIdeas,
-          variationCount: Number(document.getElementById('pwVariationCount').value) || 2
+          variationCount: varCount
         })
       });
       const json = await res.json();
@@ -1025,45 +1156,60 @@ async function runPromptWriterHandler() {
         }
       }
       pwState.lastPrompts = prompts;
-      document.getElementById('pwResultCard').hidden = false;
-      document.getElementById('pwResultOutput').value = prompts.join('\n\n');
+      const resCard = document.getElementById('pwBulkResultSection') || document.getElementById('pwResultCard');
+      if (resCard) resCard.hidden = false;
+      const resOut = document.getElementById('pwResultOutput') || document.getElementById('pwSingleOutput');
+      if (resOut) resOut.value = prompts.join('\n\n');
     }
     showToast(`✨ Đã tạo ${pwState.lastPrompts.length} prompt thành công!`);
   } catch (err) {
     alert('Lỗi Prompt Writer: ' + err.message);
   } finally {
-    btn.disabled = false;
-    btn.innerText = '✨ Tạo Prompt Bằng AI';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '✨ Tạo Prompt Bằng AI';
+    }
   }
 }
 
 function sendPromptsToVideoGen() {
-  const text = document.getElementById('pwResultOutput').value.trim();
+  const textEl = document.getElementById('pwSingleOutput') || document.getElementById('pwResultOutput');
+  const text = (textEl?.value || '').trim();
   if (!text) return;
   switchTab('tab-video-gen');
   if (pwState.lastPrompts.length > 1) {
-    document.getElementById('modeBatchBtn')?.click();
-    document.getElementById('vgBatchPromptsInput').value = pwState.lastPrompts.join('\n');
+    const btnBatch = document.getElementById('vgModeBatchLines') || document.getElementById('modeBatchBtn');
+    btnBatch?.click();
+    const batchInput = document.getElementById('vgBatchPromptsInput') || document.getElementById('vgScriptInput');
+    if (batchInput) batchInput.value = pwState.lastPrompts.join('\n');
   } else {
-    document.getElementById('modeSingleBtn')?.click();
-    document.getElementById('vgScriptInput').value = text;
+    const btnSingle = document.getElementById('vgModeSingle') || document.getElementById('modeSingleBtn');
+    btnSingle?.click();
+    const scriptInput = document.getElementById('vgScriptInput');
+    if (scriptInput) scriptInput.value = text;
   }
   showToast('🚀 Đã đẩy Prompt sang Tab Tạo Video AI!');
 }
 
 async function savePwProfileHandler() {
-  const name = document.getElementById('pwProfName').value.trim();
-  const apiKey = document.getElementById('pwProfApiKey').value.trim();
+  const nameEl = document.getElementById('pwProfileName') || document.getElementById('pwProfName');
+  const name = (nameEl?.value || '').trim();
+  const apiKeyEl = document.getElementById('pwApiKey') || document.getElementById('pwProfApiKey');
+  const apiKey = (apiKeyEl?.value || '').trim();
   if (!name) return alert('Nhập tên cấu hình!');
+
+  const provEl = document.getElementById('pwProvider') || document.getElementById('pwProfProvider');
+  const modelEl = document.getElementById('pwModel') || document.getElementById('pwProfModel');
+  const baseEl = document.getElementById('pwProfBaseUrl');
 
   await fetch('/api/prompt-writer/profiles', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name,
-      provider: document.getElementById('pwProfProvider').value,
-      model: document.getElementById('pwProfModel').value.trim() || 'gemini-2.5-flash',
-      baseUrl: document.getElementById('pwProfBaseUrl').value.trim(),
+      provider: provEl?.value || 'gemini',
+      model: (modelEl?.value || '').trim() || 'gemini-2.5-flash',
+      baseUrl: (baseEl?.value || '').trim(),
       apiKey
     })
   });
@@ -1072,8 +1218,10 @@ async function savePwProfileHandler() {
 }
 
 async function savePwSkillHandler() {
-  const name = document.getElementById('pwSkillName').value.trim();
-  const systemPrompt = document.getElementById('pwSkillPrompt').value.trim();
+  const nameEl = document.getElementById('pwSkillName');
+  const name = (nameEl?.value || '').trim();
+  const promptEl = document.getElementById('pwSkillInstructions') || document.getElementById('pwSkillPrompt');
+  const systemPrompt = (promptEl?.value || '').trim();
   if (!name || !systemPrompt) return alert('Vui lòng nhập tên và hướng dẫn hệ thống!');
 
   await fetch('/api/prompt-writer/skills', {
@@ -1081,8 +1229,8 @@ async function savePwSkillHandler() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, systemPrompt })
   });
-  document.getElementById('pwSkillName').value = '';
-  document.getElementById('pwSkillPrompt').value = '';
+  if (nameEl) nameEl.value = '';
+  if (promptEl) promptEl.value = '';
   await loadPromptWriterConfig();
   showToast('🎯 Đã thêm kỹ năng viết Prompt mới!');
 }
@@ -1096,11 +1244,20 @@ async function loadAccounts() {
     const res = await fetch('/api/accounts');
     const json = await res.json();
     if (!json.success) return;
-    accountsList = json.data.accounts || [];
-    const stats = json.data.stats || {};
+    const data = json.data || json;
+    accountsList = data.accounts || [];
+    const stats = data.stats || {};
 
-    document.getElementById('statAccountsReady').innerText =
-      `${stats.activeAccounts || 0}/${stats.totalAccounts || 0}`;
+    const safeSet = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.innerText = val;
+    };
+
+    safeSet('statAccountsReady', `${stats.activeAccounts || 0}/${stats.totalAccounts || 0}`);
+    safeSet('accStatTotal', stats.totalAccounts || accountsList.length);
+    safeSet('accStatValid', stats.activeAccounts || accountsList.filter(a => a.status === 'ready').length);
+    safeSet('accStatProxy', stats.proxyAccounts || accountsList.filter(a => a.proxy).length);
+    safeSet('accStatExpired', stats.expiredAccounts || accountsList.filter(a => a.status !== 'ready').length);
 
     renderAccountsTable();
   } catch (e) {
@@ -1109,7 +1266,7 @@ async function loadAccounts() {
 }
 
 function renderAccountsTable() {
-  const tbody = document.getElementById('accountsTableRows');
+  const tbody = document.getElementById('accountsTableBody') || document.getElementById('accountsTableRows');
   if (!tbody) return;
   if (accountsList.length === 0) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Chưa có tài khoản nào.</td></tr>`;
@@ -1144,23 +1301,29 @@ function renderAccountsTable() {
 }
 
 async function addAccountHandler() {
-  const name = document.getElementById('accNameInput').value.trim();
+  const nameEl = document.getElementById('accNewName') || document.getElementById('accNameInput');
+  const name = nameEl?.value?.trim();
   if (!name) return alert('Nhập tên gợi nhớ cho tài khoản!');
+
+  const proxyEl = document.getElementById('accNewProxy') || document.getElementById('accProxyInput');
+  const cookieEl = document.getElementById('accNewCookie') || document.getElementById('accCookieInput');
+  const emailEl = document.getElementById('accEmailInput');
+  const providerEl = document.getElementById('accProviderInput');
 
   const res = await fetch('/api/accounts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name,
-      email: document.getElementById('accEmailInput').value.trim(),
-      provider: document.getElementById('accProviderInput').value,
-      proxy: document.getElementById('accProxyInput').value.trim()
+      email: emailEl?.value?.trim() || '',
+      provider: providerEl?.value || 'gemini',
+      proxy: proxyEl?.value?.trim() || ''
     })
   });
   const json = await res.json();
   if (!json.success) return alert(json.error);
 
-  const cookieRaw = document.getElementById('accCookieInput').value.trim();
+  const cookieRaw = cookieEl?.value?.trim();
   if (cookieRaw) {
     await fetch(`/api/accounts/${json.data.id}/cookies`, {
       method: 'POST',
@@ -1169,15 +1332,16 @@ async function addAccountHandler() {
     });
   }
 
-  document.getElementById('accNameInput').value = '';
-  document.getElementById('accEmailInput').value = '';
-  document.getElementById('accCookieInput').value = '';
+  if (nameEl) nameEl.value = '';
+  if (proxyEl) proxyEl.value = '';
+  if (cookieEl) cookieEl.value = '';
+  if (emailEl) emailEl.value = '';
   await loadAccounts();
   showToast('➕ Đã thêm tài khoản vào Pool!');
 }
 
 async function assignBulkProxiesHandler() {
-  const rawProxies = document.getElementById('bulkProxyInput').value.trim();
+  const rawProxies = (document.getElementById('bulkProxyText')?.value || document.getElementById('bulkProxyInput')?.value || '').trim();
   if (!rawProxies) return alert('Vui lòng dán danh sách Proxy!');
 
   const res = await fetch('/api/accounts/assign-proxies', {
@@ -1219,7 +1383,7 @@ async function loadUnifiedLibrary() {
     const res = await fetch('/api/library');
     const json = await res.json();
     if (!json.success) return;
-    unifiedLibrary = json.data || [];
+    unifiedLibrary = json.items || json.data || [];
     renderUnifiedLibrary();
   } catch (e) {
     console.error('Lỗi tải thư viện hợp nhất:', e);
@@ -1228,12 +1392,15 @@ async function loadUnifiedLibrary() {
 
 function renderUnifiedLibrary() {
   const grid = document.getElementById('unifiedLibraryGrid');
+  const countBadge = document.getElementById('libTotalCount');
   if (!grid) return;
 
   const filtered = unifiedLibrary.filter(item => {
     if (activeLibFilter === 'all') return true;
     return item.source === activeLibFilter;
   });
+
+  if (countBadge) countBadge.innerText = `${filtered.length}`;
 
   if (filtered.length === 0) {
     grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--text-muted);">Chưa có video nào trong phân mục này.</div>`;

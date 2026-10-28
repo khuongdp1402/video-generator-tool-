@@ -2,9 +2,9 @@
 const DEFAULT_CDP_URL = 'http://localhost:9222';
 const GEMINI_URL = 'https://gemini.google.com/app';
 
-async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL) {
+async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL, timeout = 2500) {
   const { chromium } = require('playwright');
-  const browser = await chromium.connectOverCDP(cdpUrl);
+  const browser = await chromium.connectOverCDP(cdpUrl, { timeout });
   const context = browser.contexts()[0];
   if (!context) {
     throw new Error('Không tìm thấy Chrome context nào. Hãy mở Chrome với --remote-debugging-port=9222.');
