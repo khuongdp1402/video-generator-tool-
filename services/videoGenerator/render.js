@@ -28,13 +28,21 @@ function estimateLessonDurationFrames(lessonText) {
 
 function buildVideoDataJson(project) {
   const marketPreset = getMarketPreset(project.market || 'VI');
-  const scenes = project.scenes.map((s) => ({ ...s }));
+  const layoutMode =
+    project.layoutMode ||
+    (project.meta && project.meta.layoutMode) ||
+    (project.kind === 'psych_split' ? 'split' : 'fullscreen');
+
+  const scenes = project.scenes.map((s) => ({
+    ...s,
+    type: layoutMode === 'split' && (!s.type || s.type === 'media') ? 'split_media' : s.type || 'media',
+  }));
 
   if (project.lessonText && project.lessonText.trim()) {
     scenes.push({
       id: scenes.length + 1,
       type: 'lesson',
-      title: marketPreset.lessonTitle,
+      title: project.market && project.market !== 'VI' ? marketPreset.lessonTitle : 'Bài học rút ra',
       text: project.lessonText.trim(),
       audioFile: '',
       durationInFrames: estimateLessonDurationFrames(project.lessonText),
@@ -47,12 +55,14 @@ function buildVideoDataJson(project) {
       market: marketPreset.code,
       language: project.meta?.language || marketPreset.language,
       locale: project.meta?.locale || marketPreset.locale,
-      theme: project.meta.theme,
-      bgMusic: project.meta.bgMusic || '',
+      theme: (project.meta && project.meta.theme) || 'dark-cyan',
+      bgMusic: (project.meta && project.meta.bgMusic) || '',
       musicVolume: 0.08,
-      voice: project.meta.voice || marketPreset.defaultVoice,
-      voiceRate: project.meta.voiceRate || marketPreset.defaultVoiceRate || '+0%',
-      aspectRatio: project.aspectRatio,
+      voice: (project.meta && project.meta.voice) || marketPreset.defaultVoice,
+      voiceRate: (project.meta && project.meta.voiceRate) || marketPreset.defaultVoiceRate || '+0%',
+      aspectRatio: project.aspectRatio || '9:16',
+      layoutMode,
+      channelName: project.channelName || (project.meta && project.meta.channelName) || 'LÀNH TÂM',
     },
     scenes,
   };

@@ -4,13 +4,50 @@ const { extractJson, JsonExtractionError } = require('./chatJson');
 const { sendPromptAndWaitForStableReply } = require('./geminiChat');
 const { chatCompletionJson } = require('./agentgwClient');
 
-function buildDirectorPrompt(rawScript, kind, market = 'VI') {
+function buildDirectorPrompt(rawScript, kind, opts = {}) {
   const script = (rawScript || '').trim();
   if (!script) {
     throw new Error('Thiếu kịch bản — không thể chia scene từ kịch bản rỗng.');
   }
   const preset = getStylePreset(kind);
+
+  // Normalize options: opts can be a market string or an options object
+  const options = typeof opts === 'string' ? { market: opts } : (opts || {});
+  const market = options.market || 'VI';
   const marketPreset = getMarketPreset(market);
+
+  const {
+    targetDuration = 30,
+    filmRules = '',
+    sceneRules = [],
+    filmAssets = [],
+  } = options;
+
+  const targetSceneCount = Math.max(2, Math.min(10, Math.round(Number(targetDuration || 30) / 6)));
+
+  let extraContext = '';
+  if (filmRules && filmRules.trim()) {
+    extraContext += `\nQuy tắc nhất quán toàn phim:\n"""\n${filmRules.trim()}\n"""\n`;
+  }
+  if (Array.isArray(sceneRules) && sceneRules.length > 0) {
+    extraContext +=
+      `\nQuy tắc theo khoảng cảnh:\n` +
+      sceneRules.map((r) => `- Cảnh ${r.sceneStart}–${r.sceneEnd} (${r.name}): ${r.rules}`).join('\n') +
+      '\n';
+  }
+  if (Array.isArray(filmAssets) && filmAssets.length > 0) {
+    extraContext +=
+      `\nDanh sách Nhân vật & Bối cảnh tham chiếu cần giữ nhất quán:\n` +
+      filmAssets
+        .map(
+          (a) =>
+            `- [${a.role}] ${a.name}${a.sceneStart ? ` (Cảnh ${a.sceneStart}–${a.sceneEnd})` : ''}: ${
+              a.description || 'Giữ đúng nhận diện ảnh tham chiếu'
+            }`
+        )
+        .join('\n') +
+      '\n';
+  }
 
   const marketRule =
     marketPreset.code === 'US'
@@ -27,21 +64,29 @@ function buildDirectorPrompt(rawScript, kind, market = 'VI') {
         `- ${marketPreset.scriptInstruction}\n` +
         `- "highlightWords" gồm 1-3 từ khóa nổi bật trong câu thoại.`;
 
+  const psychInstruction =
+    kind === 'psych_split'
+      ? `\nLƯU Ý ĐẶC BIỆT CHO PHONG CÁCH TÂM LÝ HỌC LÀNH TÂM (psych_split):\n` +
+        `- Bắt buộc mỗi scene phải có 2 trường thoại: "text" (tiếng Việt súc tích để đọc voiceover) VÀ "textEn" (câu dịch tiếng Anh chuẩn tự nhiên để hiện khung phụ đề tiếng Anh bên dưới).\n` +
+        `- Gán "visualMode": "mode_a" cho cảnh đời thường/đối thoại (Pictogram đen trắng), hoặc "mode_b" cho cảnh phân tích chiều sâu tâm lý (Surreal Neon xanh tím).\n`
+      : '';
+
   return `Bạn là đạo diễn AI cho video ngắn.
 ${preset.directorGuidance}
 ${marketRule}
+${psychInstruction}
 
-Kịch bản / Ý tưởng đầu vào:
+Kịch bản:
 """
 ${script}
 """
-
-Style hình ảnh/video áp dụng cho MỌI scene (giữ nguyên các từ khoá tiếng Anh này trong mỗi videoPrompt/imagePrompt):
+${extraContext}
+Style hình ảnh/video áp dụng cho MỌI scene (giữ nguyên các từ khoá này trong mỗi videoPrompt/imagePrompt):
 """
 ${preset.characterStyleBlock}
 """
 
-Chia kịch bản trên thành 4-8 scene. Trả lời DUY NHẤT một JSON object theo đúng schema sau,
+Chia kịch bản trên thành khoảng ${targetSceneCount} scene (3-8 scene). Trả lời DUY NHẤT một JSON object theo đúng schema sau,
 không thêm bất kỳ text nào khác trước hoặc sau JSON:
 {
   "title": "Tiêu đề video bằng ngôn ngữ của thị trường ${marketPreset.code}",
@@ -53,10 +98,13 @@ không thêm bất kỳ text nào khác trước hoặc sau JSON:
   },
   "scenes": [
     {
+      "id": 1,
       "text": "đoạn lời thoại/nội dung kịch bản mà scene này thể hiện (bằng ngôn ngữ ${marketPreset.locale})",
-      "highlightWords": ["word1", "word2"],
-      "imagePrompt": "detailed English still-image prompt for this scene, including the style block above",
-      "videoPrompt": "detailed English motion/camera prompt to animate this scene into video, including the style block above",
+      "textEn": "bilingual English subtitle translation if psych_split",
+      "visualMode": "mode_a hoặc mode_b (nếu psych_split)",
+      "highlightWords": ["từ1", "từ2"],
+      "imagePrompt": "prompt chi tiết tiếng Anh tạo hình ảnh cho scene này, BẮT BUỘC bao gồm style ở trên",
+      "videoPrompt": "prompt chi tiết tiếng Anh mô tả chuyển động camera/nhân vật để biến ảnh thành video, bao gồm style ở trên",
       "durationSec": 6
     }
   ]
@@ -64,7 +112,7 @@ không thêm bất kỳ text nào khác trước hoặc sau JSON:
 }
 
 async function planScenesWithAgentGW(rawScript, kind, market = 'US', opts = {}) {
-  const prompt = buildDirectorPrompt(rawScript, kind, market);
+  const prompt = buildDirectorPrompt(rawScript, kind, { ...opts, market });
   const parsed = await chatCompletionJson({
     systemPrompt:
       'You are an elite multimodal video director and cross-cultural localization expert for US (English) and Japan (Japanese) YouTube channels. Always output strict valid JSON only.',
@@ -75,7 +123,7 @@ async function planScenesWithAgentGW(rawScript, kind, market = 'US', opts = {}) 
     fetchImpl: opts.fetchImpl,
   });
 
-  const scenes = normalizeScenes(parsed.scenes);
+  const scenes = normalizeScenes(parsed.scenes, { layoutMode: opts.layoutMode });
   return {
     scenes,
     title: parsed.title || '',
@@ -137,47 +185,51 @@ Trả lời DUY NHẤT một JSON object theo schema:
   };
 }
 
-async function planScenes(page, rawScript, kind, market = 'VI') {
+async function planScenes(page, rawScript, kind, opts = {}) {
+  const options = typeof opts === 'string' ? { market: opts } : (opts || {});
   if (!page) {
-    const res = await planScenesWithAgentGW(rawScript, kind, market);
+    const res = await planScenesWithAgentGW(rawScript, kind, options.market || 'US', options);
     return res.scenes;
   }
 
-  const prompt = buildDirectorPrompt(rawScript, kind, market);
+  const prompt = buildDirectorPrompt(rawScript, kind, options);
+  const preset = getStylePreset(kind);
+  const layoutMode = options.layoutMode || preset.defaultLayout || 'fullscreen';
 
   let reply;
   try {
     reply = await sendPromptAndWaitForStableReply(page, prompt);
-    return normalizeScenes(extractJson(reply).scenes);
+    return normalizeScenes(extractJson(reply).scenes, { layoutMode });
   } catch (err) {
     if (!(err instanceof JsonExtractionError)) {
       throw err;
     }
-    // One retry: ask Gemini to reformat as strict JSON, reusing the same chat context.
     const retryReply = await sendPromptAndWaitForStableReply(
       page,
       'Câu trả lời trước không phải JSON hợp lệ. Trả lời lại DUY NHẤT một JSON object hợp lệ theo đúng schema đã yêu cầu, không thêm text nào khác.'
     );
-    return normalizeScenes(extractJson(retryReply).scenes);
+    return normalizeScenes(extractJson(retryReply).scenes, { layoutMode });
   }
 }
 
-function normalizeScenes(rawScenes) {
+function normalizeScenes(rawScenes, opts = {}) {
   if (!Array.isArray(rawScenes) || rawScenes.length === 0) {
     throw new Error('Director trả về danh sách scene rỗng hoặc không hợp lệ.');
   }
+  const sceneType = opts.layoutMode === 'split' ? 'split_media' : 'media';
   return rawScenes.map((s, i) => ({
     id: i + 1,
-    type: 'media',
+    type: s.type || sceneType,
     text: s.text || '',
+    textEn: s.textEn || '',
+    visualMode: s.visualMode || 'standard',
     highlightWords: Array.isArray(s.highlightWords) ? s.highlightWords : [],
     imagePrompt: s.imagePrompt || '',
     videoPrompt: s.videoPrompt || '',
     durationSec: s.durationSec || 6,
-    audioFile: '',
-    durationInFrames: Math.round((s.durationSec || 6) * 30),
-    mediaStatus: 'pending',
-    mediaFile: null,
+    audioFile: s.audioFile || '',
+    mediaFile: s.mediaFile || '',
+    mediaStatus: s.mediaStatus || 'pending',
   }));
 }
 

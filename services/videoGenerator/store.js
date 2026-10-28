@@ -1,20 +1,19 @@
 // services/videoGenerator/store.js
 const fs = require('fs');
 const path = require('path');
-const { getMarketPreset } = require('./stylePresets');
-
-const VALID_KINDS = ['story', 'handdrawn', 'minimalist'];
+const { VALID_KINDS, getStylePreset, getMarketPreset } = require('./stylePresets');
 
 function createStore(dataFile) {
   function getDb() {
-    if (fs.existsSync(dataFile)) {
-      try {
-        return JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
-      } catch (e) {
-        return { projects: [] };
-      }
+    if (!fs.existsSync(dataFile)) {
+      return { projects: [] };
     }
-    return { projects: [] };
+    const raw = fs.readFileSync(dataFile, 'utf-8');
+    try {
+      return JSON.parse(raw);
+    } catch (_e) {
+      return { projects: [] };
+    }
   }
 
   function saveDb(db) {
@@ -22,7 +21,6 @@ function createStore(dataFile) {
     fs.writeFileSync(dataFile, JSON.stringify(db, null, 2));
   }
 
-  let seq = 0;
   function createProject({
     kind,
     aspectRatio,
@@ -32,41 +30,72 @@ function createStore(dataFile) {
     voiceRate,
     lessonText = '',
     title = '',
+    channelName = 'LÀNH TÂM',
+    layoutMode = null,
+    targetDuration = 30,
+    projectId = null,
+    sceneNo = null,
+    predecessorId = null,
+    continuityOffset = 0.3,
+    refs = [],
+    accountId = null,
     youtubeMeta = null,
     meta = {},
     scenes = [],
+    status = 'planning',
   }) {
     if (!VALID_KINDS.includes(kind)) {
       throw new Error(`Unknown kind: ${kind}`);
     }
-    const marketPreset = getMarketPreset(market);
+    const preset = getStylePreset(kind);
+    const resolvedLayout = layoutMode || preset.defaultLayout || 'fullscreen';
+    const marketPreset = getMarketPreset(market || 'VI');
     const now = new Date().toISOString();
-    seq += 1;
+
     const project = {
-      id: `gp_${Date.now()}${seq > 1 ? String(seq) : ''}`,
+      id: `gp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       kind,
       market: marketPreset.code,
-      aspectRatio,
+      aspectRatio: aspectRatio || preset.defaultAspectRatio || '9:16',
       title: title || '',
+      channelName: channelName || 'LÀNH TÂM',
+      layoutMode: resolvedLayout,
+      targetDuration: Number(targetDuration) || 30,
+      projectId: projectId || null,
+      sceneNo: sceneNo != null ? Number(sceneNo) : null,
+      predecessorId: predecessorId || null,
+      continuityOffset: Number(continuityOffset) || 0.3,
+      refs: Array.isArray(refs) ? refs.slice(0, 8) : [],
+      accountId: accountId || null,
+      threadUrl: null,
+      error: null,
       rawScript,
       lessonText,
       youtubeMeta: youtubeMeta || null,
       meta: {
-        theme: kind === 'handdrawn' || kind === 'minimalist' ? 'warm-orange' : 'dark-cyan',
+        theme:
+          kind === 'handdrawn' || kind === 'minimalist'
+            ? 'warm-orange'
+            : kind === 'psych_split' || kind === 'psych_surreal'
+            ? 'dark-purple'
+            : 'dark-cyan',
         language: marketPreset.language,
         locale: marketPreset.locale,
-        voice: voice || marketPreset.defaultVoice,
+        voice: voice || (market !== 'VI' ? marketPreset.defaultVoice : 'vi-VN-NamMinhNeural'),
         voiceRate: voiceRate || marketPreset.defaultVoiceRate || '+0%',
         bgMusic: '',
+        layoutMode: resolvedLayout,
+        channelName: channelName || 'LÀNH TÂM',
         ...meta,
       },
       scenes: scenes || [],
-      status: 'planning',
+      status,
       outputPath: null,
       publishing: { tiktok: { posted: false, postedAt: null, url: null } },
       createdAt: now,
       updatedAt: now,
     };
+
     const db = getDb();
     db.projects.unshift(project);
     saveDb(db);
@@ -84,23 +113,32 @@ function createStore(dataFile) {
     if (!project) {
       throw new Error(`Không tìm thấy project ${id}`);
     }
-    let nextTime = new Date().toISOString();
-    if (nextTime === project.updatedAt) {
-      nextTime = new Date(Date.now() + 1).toISOString();
-    }
-    Object.assign(project, updates, { updatedAt: nextTime });
+    Object.assign(project, updates, { updatedAt: new Date().toISOString() });
     saveDb(db);
     return project;
+  }
+
+  function deleteProject(id) {
+    const db = getDb();
+    const idx = db.projects.findIndex((p) => p.id === id);
+    if (idx === -1) return false;
+    db.projects.splice(idx, 1);
+    saveDb(db);
+    return true;
   }
 
   function listProjects() {
     return getDb().projects;
   }
 
-  return { getDb, saveDb, createProject, getProject, updateProject, listProjects };
+  return { getDb, saveDb, createProject, getProject, updateProject, deleteProject, listProjects };
 }
 
 const defaultDataFile = path.join(__dirname, '..', '..', 'storage', 'generated_projects.json');
 const defaultStore = createStore(defaultDataFile);
 
-module.exports = { createStore, ...defaultStore };
+module.exports = {
+  createStore,
+  VALID_KINDS,
+  ...defaultStore,
+};
