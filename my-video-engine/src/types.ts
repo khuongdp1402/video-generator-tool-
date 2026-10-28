@@ -13,9 +13,24 @@ export interface VideoMeta {
   voiceRate?: string;
   /** "16:9" (1280x720) or "9:16" (720x1280). Defaults to "16:9" if absent. */
   aspectRatio?: "16:9" | "9:16";
+  /** Channel badge displayed in 3-zone split layout (e.g. "LÀNH TÂM"). */
+  channelName?: string;
+  /** "fullscreen" (default) or "split" (3-zone Lành Tâm psychology layout). */
+  layoutMode?: "fullscreen" | "split";
 }
 
-export type SceneType = "headline" | "bullet_points" | "tip" | "outro" | "dialogue" | "story" | "whiteboard" | "media" | "lesson" | "minimalist";
+export type SceneType =
+  | "headline"
+  | "bullet_points"
+  | "tip"
+  | "outro"
+  | "dialogue"
+  | "story"
+  | "whiteboard"
+  | "media"
+  | "split_media"
+  | "lesson"
+  | "minimalist";
 
 export interface DrawingItem {
   type: string;
@@ -29,6 +44,10 @@ export interface Scene {
   id: number;
   type: SceneType;
   text: string;
+  /** Optional English translation for bilingual subtitle display in SplitPsychScene */
+  textEn?: string;
+  /** Optional visual mode hint: "pictogram" | "surreal" | "standard" */
+  visualMode?: string;
   audioFile: string;
   durationInFrames: number;
   highlightWords?: string[];

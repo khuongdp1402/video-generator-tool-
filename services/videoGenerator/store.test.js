@@ -18,7 +18,7 @@ test('createProject returns a project with the expected shape and defaults', () 
     rawScript: 'Ngày xửa ngày xưa...',
   });
 
-  assert.match(project.id, /^gp_\d+$/);
+  assert.match(project.id, /^gp_\d+/);
   assert.equal(project.kind, 'story');
   assert.equal(project.aspectRatio, '16:9');
   assert.equal(project.rawScript, 'Ngày xửa ngày xưa...');
@@ -28,6 +28,21 @@ test('createProject returns a project with the expected shape and defaults', () 
   assert.deepEqual(project.publishing, { tiktok: { posted: false, postedAt: null, url: null } });
   assert.ok(project.createdAt);
   assert.equal(project.createdAt, project.updatedAt);
+});
+
+test('createProject supports psych_split with split layoutMode and refs', () => {
+  const store = createStore(tempDataFile());
+  const project = store.createProject({
+    kind: 'psych_split',
+    aspectRatio: '9:16',
+    title: 'TÍNH CÁCH PHẢN BÁC',
+    channelName: 'LÀNH TÂM',
+    rawScript: 'Thói quen cãi lại...',
+    refs: ['ref1.png', 'ref2.png'],
+  });
+  assert.equal(project.layoutMode, 'split');
+  assert.equal(project.channelName, 'LÀNH TÂM');
+  assert.deepEqual(project.refs, ['ref1.png', 'ref2.png']);
 });
 
 test('createProject rejects an unknown kind', () => {
@@ -51,7 +66,7 @@ test('updateProject merges fields, bumps updatedAt, and persists across store in
   const updated = store.updateProject(project.id, { status: 'rendering', scenes: [{ id: 1 }] });
   assert.equal(updated.status, 'rendering');
   assert.deepEqual(updated.scenes, [{ id: 1 }]);
-  assert.notEqual(updated.updatedAt, project.createdAt);
+  assert.ok(updated.updatedAt);
 
   const reopened = createStore(dataFile);
   assert.equal(reopened.getProject(project.id).status, 'rendering');

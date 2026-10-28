@@ -16,7 +16,11 @@ function estimateLessonDurationFrames(lessonText) {
 }
 
 function buildVideoDataJson(project) {
-  const scenes = project.scenes.map((s) => ({ ...s }));
+  const layoutMode = project.layoutMode || (project.meta && project.meta.layoutMode) || (project.kind === 'psych_split' ? 'split' : 'fullscreen');
+  const scenes = project.scenes.map((s) => ({
+    ...s,
+    type: layoutMode === 'split' && (!s.type || s.type === 'media') ? 'split_media' : (s.type || 'media'),
+  }));
 
   if (project.lessonText && project.lessonText.trim()) {
     scenes.push({
@@ -32,12 +36,14 @@ function buildVideoDataJson(project) {
   return {
     meta: {
       title: project.title || project.kind,
-      theme: project.meta.theme,
-      bgMusic: project.meta.bgMusic || '',
+      theme: (project.meta && project.meta.theme) || 'dark-cyan',
+      bgMusic: (project.meta && project.meta.bgMusic) || '',
       musicVolume: 0.08,
-      voice: project.meta.voice,
-      voiceRate: project.meta.voiceRate,
-      aspectRatio: project.aspectRatio,
+      voice: (project.meta && project.meta.voice) || 'vi-VN-NamMinhNeural',
+      voiceRate: (project.meta && project.meta.voiceRate) || '+0%',
+      aspectRatio: project.aspectRatio || '9:16',
+      layoutMode,
+      channelName: project.channelName || (project.meta && project.meta.channelName) || 'LÀNH TÂM',
     },
     scenes,
   };

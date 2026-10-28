@@ -15,6 +15,7 @@ import { DialogueScene } from "./templates/DialogueScene";
 import { StoryScene } from "./templates/StoryScene";
 import { WhiteboardScene } from "./templates/WhiteboardScene";
 import { MinimalistScene } from "./templates/MinimalistScene";
+import { SplitPsychScene } from "./templates/SplitPsychScene";
 import { MediaScene } from "./components/MediaScene";
 import { VideoData, ThemeColors, THEMES } from "./types";
 import videoData from "./data/video_data.json";
@@ -67,7 +68,7 @@ export const VideoComposition: React.FC = () => {
             durationInFrames={scene.durationInFrames}
             name={`Scene ${scene.id}: ${scene.type}`}
           >
-            {renderScene(scene, themeColors)}
+            {renderScene(scene, themeColors, data.meta)}
           </Sequence>
         );
       })}
@@ -87,7 +88,14 @@ export const VideoComposition: React.FC = () => {
 /**
  * Maps a scene to its corresponding template component.
  */
-function renderScene(scene: VideoData["scenes"][0], themeColors: ThemeColors) {
+function renderScene(
+  scene: VideoData["scenes"][0],
+  themeColors: ThemeColors,
+  meta: VideoData["meta"],
+) {
+  if (scene.type === "split_media" || (scene.type === "media" && meta.layoutMode === "split")) {
+    return <SplitPsychScene scene={scene} theme={themeColors} meta={meta} />;
+  }
   switch (scene.type) {
     case "headline":
       return <HeadlineScene scene={scene} theme={themeColors} />;

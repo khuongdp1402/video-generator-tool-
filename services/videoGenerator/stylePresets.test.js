@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getStylePreset, getDimensions } = require('./stylePresets');
+const { getStylePreset, listStylePresets, getDimensions } = require('./stylePresets');
 
 test('story preset has no hand-drawn keywords', () => {
   const preset = getStylePreset('story');
@@ -14,6 +14,15 @@ test('handdrawn preset carries the requested keywords', () => {
   assert.match(preset.characterStyleBlock, /blue pencil|crayon/i);
   assert.match(preset.characterStyleBlock, /paper texture/i);
   assert.match(preset.characterStyleBlock, /doodle|sketch/i);
+});
+
+test('psych_split, pictogram, psych_surreal, anime, cinematic presets are registered', () => {
+  const presets = listStylePresets();
+  assert.ok(presets.length >= 8);
+  const psych = getStylePreset('psych_split');
+  assert.equal(psych.defaultLayout, 'split');
+  assert.match(psych.characterStyleBlock, /pictogram/i);
+  assert.match(psych.characterStyleBlock, /Surrealist/i);
 });
 
 test('getStylePreset rejects an unknown kind', () => {

@@ -27,6 +27,22 @@ test('builds a video_data.json shape from a project, appending a lesson scene wh
   assert.ok(data.scenes[1].durationInFrames > 0);
 });
 
+test('maps scenes to split_media when layoutMode is split or kind is psych_split', () => {
+  const project = {
+    kind: 'psych_split',
+    aspectRatio: '9:16',
+    title: 'TÍNH CÁCH PHẢN BÁC',
+    channelName: 'LÀNH TÂM',
+    lessonText: '',
+    meta: { theme: 'dark-purple', voice: 'vi-VN-NamMinhNeural', voiceRate: '+0%', bgMusic: '' },
+    scenes: [{ id: 1, type: 'media', text: 'Có một kiểu người', textEn: 'Some people' }],
+  };
+  const data = buildVideoDataJson(project);
+  assert.equal(data.meta.layoutMode, 'split');
+  assert.equal(data.meta.channelName, 'LÀNH TÂM');
+  assert.equal(data.scenes[0].type, 'split_media');
+});
+
 test('does not append a lesson scene when lessonText is empty', () => {
   const project = {
     kind: 'handdrawn', aspectRatio: '16:9', title: 'x', lessonText: '',

@@ -2,7 +2,12 @@
 const fs = require('fs');
 const path = require('path');
 
-async function generateSceneMedia(page, scene, mediaDir) {
+/**
+ * Generates video media for a scene via Gemini Ultra Web (Veo).
+ * Supports attaching up to 8 reference images (character/scene/continuity frames)
+ * before sending the videoPrompt.
+ */
+async function generateSceneMedia(page, scene, mediaDir, opts = {}) {
   fs.mkdirSync(mediaDir, { recursive: true });
 
   const promptInput = page.locator(
@@ -10,16 +15,30 @@ async function generateSceneMedia(page, scene, mediaDir) {
   );
   await promptInput.first().waitFor({ state: 'visible', timeout: 20000 });
 
+  // Attach reference images if provided (up to 8 files)
+  const refs = (opts.refs || scene.refs || []).filter((p) => p && fs.existsSync(p)).slice(0, 8);
+  if (refs.length > 0) {
+    try {
+      const fileInputs = page.locator('input[type="file"]');
+      if ((await fileInputs.count()) > 0) {
+        await fileInputs.first().setInputFiles(refs);
+        await page.waitForTimeout(1500);
+      }
+    } catch (uploadErr) {
+      console.warn(`[Scene ${scene.id}] Không thể đính kèm trực tiếp file qua input[type=file]: ${uploadErr.message}`);
+    }
+  }
+
   // Count existing videos BEFORE submitting prompt so we NEVER grab an old video
   const initialVideoCount = await page.locator('video').count();
 
-  console.log(`[Scene ${scene.id}] Gửi video prompt (số video hiện tại: ${initialVideoCount})...`);
+  console.log(`[Scene ${scene.id}] Gửi video prompt (số video hiện tại: ${initialVideoCount}, ảnh tham chiếu: ${refs.length})...`);
   await promptInput.first().fill(scene.videoPrompt);
   await promptInput.first().press('Enter');
 
   console.log(`[Scene ${scene.id}] Đang chờ Gemini sinh video mới (Veo)...`);
   const startTime = Date.now();
-  const timeoutMs = 360000; // 6 minutes max per scene
+  const timeoutMs = (opts.timeoutMinutes ? Number(opts.timeoutMinutes) * 60 * 1000 : 360000);
   let videoSrc = null;
 
   while (Date.now() - startTime < timeoutMs) {
@@ -37,10 +56,12 @@ async function generateSceneMedia(page, scene, mediaDir) {
   }
 
   if (!videoSrc) {
-    throw new Error(`Hết thời gian chờ (timeout 6 phút) sinh video mới cho scene ${scene.id}`);
+    throw new Error(`Hết thời gian chờ sinh video mới cho scene ${scene.id}`);
   }
 
-  const outputPath = path.join(mediaDir, `scene_${scene.id}.mp4`);
+  const filePrefix = opts.projectId ? `${opts.projectId}_scene_${scene.id}` : `scene_${scene.id}`;
+  const fileName = `${filePrefix}.mp4`;
+  const outputPath = path.join(mediaDir, fileName);
 
   let downloaded = false;
   for (let attempt = 1; attempt <= 6; attempt++) {
@@ -63,7 +84,12 @@ async function generateSceneMedia(page, scene, mediaDir) {
   }
 
   console.log(`[Scene ${scene.id}] Đã lưu video thành công: ${outputPath}`);
-  return { mediaStatus: 'video', mediaFile: `media/scene_${scene.id}.mp4` };
+  return {
+    mediaStatus: 'video',
+    mediaFile: `media/${fileName}`,
+    localPath: outputPath,
+    threadUrl: page.url(),
+  };
 }
 
 module.exports = { generateSceneMedia };
