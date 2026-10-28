@@ -513,7 +513,7 @@ app.get('/api/muse/status', async (req, res) => {
   }
 });
 
-// 22d. Khởi chạy / kết nối Google Chrome với --remote-debugging-port=9222 (Chạy ngầm --headless=new mặc định với profile camhien2000qt@gmail.com)
+// 22d. Khởi chạy / kết nối Google Chrome chạy ngầm (--headless=new) cho cả Muse.ai (9222 - camhien2000qt@gmail.com) và Gemini Ultra (9223 - dophukhuong1234@gmail.com)
 app.post('/api/muse/open-browser', async (req, res) => {
   try {
     const { museUrl = DEFAULT_MUSE_URL, visible = false } = req.body || {};
@@ -523,31 +523,53 @@ app.post('/api/muse/open-browser', async (req, res) => {
         error: 'Không tìm thấy Google Chrome tại /Applications/Google Chrome.app',
       });
     }
-    const profileDir = path.join(__dirname, 'storage', 'chrome-muse-profile');
-    if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+    const museProfileDir = path.join(__dirname, 'storage', 'chrome-muse-profile');
+    const geminiProfileDir = path.join(__dirname, 'storage', 'chrome-gemini-profile');
+    if (!fs.existsSync(museProfileDir)) fs.mkdirSync(museProfileDir, { recursive: true });
+    if (!fs.existsSync(geminiProfileDir)) fs.mkdirSync(geminiProfileDir, { recursive: true });
 
-    const args = [
+    const museArgs = [
       '--remote-debugging-port=9222',
-      `--user-data-dir=${profileDir}`,
+      `--user-data-dir=${museProfileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--mute-audio',
+      '--window-size=1440,900',
+    ];
+    const geminiArgs = [
+      '--remote-debugging-port=9223',
+      `--user-data-dir=${geminiProfileDir}`,
       '--no-first-run',
       '--no-default-browser-check',
       '--mute-audio',
       '--window-size=1440,900',
     ];
     if (!visible) {
-      args.unshift('--headless=new');
+      museArgs.unshift('--headless=new');
+      geminiArgs.unshift('--headless=new');
     }
-    args.push(museUrl, 'https://gemini.google.com/app');
+    museArgs.push(museUrl);
+    geminiArgs.push('https://gemini.google.com/app');
 
-    const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
-    child.unref();
+    const childMuse = spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...museArgs], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    childMuse.unref();
+
+    const childGemini = spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...geminiArgs], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    childGemini.unref();
 
     res.json({
       success: true,
       message: visible
-        ? `Đã mở cửa sổ Chrome (CDP 9222 - camhien2000qt@gmail.com) với Muse.ai (#1) và Gemini Ultra (#2)!`
-        : `Đã kích hoạt ngầm (Headless 100%) profile camhien2000qt@gmail.com trên cổng 9222 với Muse.ai (#1) và Gemini Ultra (#2)!`,
-      profileDir,
+        ? `Đã mở Chrome cho Muse.ai (#1 · camhien2000qt@gmail.com · 9222) và Gemini Ultra (#2 · dophukhuong1234@gmail.com · 9223)!`
+        : `Đã kích hoạt ngầm (Headless 100%) Muse.ai (#1 · camhien2000qt@gmail.com · 9222) & Gemini Ultra (#2 · dophukhuong1234@gmail.com · 9223)!`,
+      profileDir: museProfileDir,
+      geminiProfileDir,
       museUrl,
       headless: !visible,
     });
@@ -797,9 +819,7 @@ app.delete('/api/film-assets/:assetId', (req, res) => {
 
 async function tryGeminiWebChatRunner(promptText) {
   try {
-    const acc = accountManager.getNextAvailableAccount();
-    const cdpUrl = `http://localhost:${(acc && acc.cdp_port) || 9222}`;
-    const { page } = await connectToGeminiPage(cdpUrl);
+    const { page } = await connectToGeminiPage();
     return await sendPromptAndWaitForStableReply(page, promptText);
   } catch (e) {
     return null;

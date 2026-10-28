@@ -4,6 +4,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const DEFAULT_PROFILE_DIR = path.join(__dirname, '..', 'storage', 'chrome-muse-profile');
+const GEMINI_PROFILE_DIR = path.join(__dirname, '..', 'storage', 'chrome-gemini-profile');
 
 function createAccountManager(dataFile) {
   const activeLoginBrowsers = new Map();
@@ -40,18 +41,18 @@ function createAccountManager(dataFile) {
         },
         {
           id: 'acc_default',
-          name: 'Gemini Ultra · camhien2000qt@gmail.com (Dự phòng #2 · Chạy ẩn CDP 9222)',
-          email: 'camhien2000qt@gmail.com',
+          name: 'Gemini Ultra · dophukhuong1234@gmail.com (Dự phòng #2 · Chạy ẩn CDP 9223)',
+          email: 'dophukhuong1234@gmail.com',
           provider: 'gemini',
-          profile_path: DEFAULT_PROFILE_DIR,
-          cdp_port: 9222,
+          profile_path: GEMINI_PROFILE_DIR,
+          cdp_port: 9223,
           proxy: null,
           enabled: true,
           auth_status: 'valid',
           auth_checked_at: now,
           auth_error: null,
           balance: '⚡ Ưu tiên #2 · Gemini Ultra (Headless Token LIVE)',
-          cookies_count: 18,
+          cookies_count: 21,
           created_at: now,
         },
       ],

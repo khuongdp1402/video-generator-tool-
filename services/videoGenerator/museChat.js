@@ -56,7 +56,7 @@ async function launchHiddenChromeMuseProfile(targetUrl = DEFAULT_MUSE_URL, headl
   const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-  const args = [
+  const chromeArgs = [
     '--remote-debugging-port=9222',
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
@@ -65,13 +65,16 @@ async function launchHiddenChromeMuseProfile(targetUrl = DEFAULT_MUSE_URL, headl
     '--window-size=1440,900',
   ];
   if (headless !== false) {
-    args.unshift('--headless=new');
+    chromeArgs.unshift('--headless=new');
   }
-  args.push(targetUrl);
+  chromeArgs.push(targetUrl);
 
-  const child = spawn(chromePath, args, { detached: true, stdio: 'ignore' });
+  const child = spawn('open', ['-n', '-a', 'Google Chrome', '--args', ...chromeArgs], {
+    detached: true,
+    stdio: 'ignore',
+  });
   child.unref();
-  await new Promise((r) => setTimeout(r, 2800));
+  await new Promise((r) => setTimeout(r, 3200));
   return true;
 }
 
