@@ -24,6 +24,7 @@ app.use('/storage/uploads', express.static(path.join(__dirname, 'storage', 'uplo
 app.use('/storage/continuity', express.static(path.join(__dirname, 'storage', 'continuity')));
 app.use('/output', express.static(path.join(__dirname, 'my-video-engine', 'output')));
 app.use('/media', express.static(path.join(__dirname, 'my-video-engine', 'public', 'media')));
+app.use('/audio', express.static(path.join(__dirname, 'my-video-engine', 'public', 'audio')));
 
 ['raw', 'remake', 'video-gen', 'uploads', 'continuity', 'profiles'].forEach((sub) => {
   const dir = path.join(__dirname, 'storage', sub);
@@ -1028,6 +1029,33 @@ function buildInstantLocalScenes(rawScript, kind, layoutMode) {
   );
 }
 
+// 22b. Nghe thử giọng đọc AI (TTS Studio Preview)
+app.post('/api/video-gen/tts-preview', async (req, res) => {
+  try {
+    const {
+      text = 'Trong cuộc sống, sự điềm tĩnh và gãy gọn chính là vũ khí mạnh nhất của người trưởng thành.',
+      voice = 'vi-VN-NamMinhNeural',
+      voiceRate = '+20%',
+    } = req.body || {};
+
+    const previewId = `preview_${Date.now()}`;
+    const result = await generateSceneAudio(
+      { id: previewId, type: 'media', text: String(text || '').slice(0, 320) },
+      voice,
+      voiceRate,
+      AUDIO_DIR
+    );
+    res.json({
+      success: true,
+      audioUrl: `/${result.audioFile}?t=${Date.now()}`,
+      voice,
+      voiceRate,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 23. Tạo project mới + chia scene (Gemini Ultra chat hoặc Instant Local Fallback)
 app.post(
   '/api/video-gen/plan',
@@ -1047,6 +1075,9 @@ app.post(
         rawScript,
         lessonText,
         title,
+        voice = 'vi-VN-NamMinhNeural',
+        voiceRate = '+20%',
+        market = 'VI',
       } = req.body;
 
       if (!rawScript || !rawScript.trim()) {
@@ -1060,6 +1091,9 @@ app.post(
 
       const project = videoGenStore.createProject({
         kind,
+        market,
+        voice,
+        voiceRate,
         aspectRatio,
         layoutMode,
         channelName,
@@ -1120,29 +1154,38 @@ app.post('/api/video-gen/batches', (req, res) => {
       chainMode = 'none',
       continuityOffset = 0.3,
       lessonText = '',
+      voice = 'vi-VN-NamMinhNeural',
+      voiceRate = '+20%',
+      market = 'VI',
       prompts = [],
+      items = [],
     } = req.body;
 
-    if (!Array.isArray(prompts) || prompts.length === 0) {
+    const batchList = Array.isArray(prompts) && prompts.length > 0 ? prompts : Array.isArray(items) ? items : [];
+    if (batchList.length === 0) {
       return res.status(400).json({ error: 'Vui lòng nhập ít nhất 1 kịch bản / prompt' });
     }
 
     const createdProjects = [];
     let prevProjectId = null;
 
-    prompts.forEach((item, index) => {
-      const rawScript = (typeof item === 'string' ? item : item.prompt || '').trim();
+    batchList.forEach((item, index) => {
+      const rawScript = (typeof item === 'string' ? item : item.rawScript || item.prompt || '').trim();
       if (!rawScript) return;
       const itemRefs = (typeof item === 'object' && Array.isArray(item.refs)) ? item.refs : [];
       const itemTitle = (typeof item === 'object' && item.title) ? item.title : rawScript.slice(0, 48);
       const sceneNo = projectId ? Number(sceneStart || 1) + index : index + 1;
       const shouldChain =
         chainMode === 'all' ||
+        Boolean(req.body.chainContinuity) ||
         (chainMode === 'selected' && Array.isArray(req.body.chainScenes) && req.body.chainScenes.includes(sceneNo));
 
       const scenes = buildInstantLocalScenes(rawScript, kind, layoutMode);
       const proj = videoGenStore.createProject({
         kind,
+        market,
+        voice,
+        voiceRate,
         aspectRatio,
         layoutMode,
         channelName,
@@ -1166,6 +1209,7 @@ app.post('/api/video-gen/batches', (req, res) => {
       success: true,
       batchCount: createdProjects.length,
       projects: createdProjects,
+      data: createdProjects,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1254,8 +1298,17 @@ async function executeProjectGeneration(id, options = {}) {
 
   videoGenStore.updateProject(id, { status: 'generating_audio' });
   const marketPreset = getMarketPreset(project.market || 'VI');
-  const selectedVoice = project.meta?.voice || marketPreset.defaultVoice;
-  const selectedRate = project.meta?.voiceRate || marketPreset.defaultVoiceRate || '+0%';
+  const selectedVoice = options.voice || project.meta?.voice || marketPreset.defaultVoice;
+  const selectedRate = options.voiceRate || project.meta?.voiceRate || marketPreset.defaultVoiceRate || '+20%';
+
+  if (options.voice || options.voiceRate) {
+    project.meta = {
+      ...(project.meta || {}),
+      voice: selectedVoice,
+      voiceRate: selectedRate,
+    };
+    videoGenStore.updateProject(id, { meta: project.meta });
+  }
 
   for (let i = 0; i < project.scenes.length; i++) {
     const audioResult = await generateSceneAudio(
@@ -1266,6 +1319,29 @@ async function executeProjectGeneration(id, options = {}) {
     );
     project.scenes[i] = audioResult;
     videoGenStore.updateProject(id, { scenes: project.scenes });
+  }
+
+  // Tạo giọng đọc cho câu Bài học kết video (nếu có) để cuối video không bị im lặng
+  if (project.lessonText && project.lessonText.trim()) {
+    try {
+      const lessonAudio = await generateSceneAudio(
+        {
+          id: `${project.id}_lesson`,
+          type: 'lesson',
+          title: project.market && project.market !== 'VI' ? marketPreset.lessonTitle : 'Bài học rút ra',
+          text: project.lessonText.trim(),
+        },
+        selectedVoice,
+        selectedRate,
+        AUDIO_DIR
+      );
+      videoGenStore.updateProject(id, {
+        lessonAudioFile: lessonAudio.audioFile || '',
+        lessonDurationInFrames: lessonAudio.durationInFrames || null,
+      });
+    } catch (lessonErr) {
+      console.warn('[TTS] Không tạo được audio cho câu bài học:', lessonErr.message);
+    }
   }
 
   videoGenStore.updateProject(id, { status: 'rendering' });
@@ -1281,6 +1357,8 @@ app.post(
       const updated = await executeProjectGeneration(req.params.id, {
         renderOnly: Boolean(req.body && req.body.renderOnly),
         allowFallbackRender: Boolean(req.body && req.body.allowFallbackRender),
+        voice: req.body?.voice,
+        voiceRate: req.body?.voiceRate,
       });
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -1299,6 +1377,8 @@ app.post(
       const updated = await executeProjectGeneration(req.params.id, {
         renderOnly: true,
         allowFallbackRender: true,
+        voice: req.body?.voice,
+        voiceRate: req.body?.voiceRate,
       });
       res.json({ success: true, data: updated });
     } catch (err) {

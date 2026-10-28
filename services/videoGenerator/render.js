@@ -44,8 +44,8 @@ function buildVideoDataJson(project) {
       type: 'lesson',
       title: project.market && project.market !== 'VI' ? marketPreset.lessonTitle : 'Bài học rút ra',
       text: project.lessonText.trim(),
-      audioFile: '',
-      durationInFrames: estimateLessonDurationFrames(project.lessonText),
+      audioFile: project.lessonAudioFile || '',
+      durationInFrames: project.lessonDurationInFrames || estimateLessonDurationFrames(project.lessonText),
     });
   }
 

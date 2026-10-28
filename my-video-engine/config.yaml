@@ -7,8 +7,8 @@ resolution:
 
 tts:
   voice: "vi-VN-NamMinhNeural"
-  rate: "-5%"
-  padding_seconds: 0.5
+  rate: "+18%"
+  padding_seconds: 0.13
 
 whisper:
   model: "base"
@@ -27,7 +27,7 @@ markets:
     language: "en"
     locale: "en-US"
     voice: "en-US-AndrewMultilingualNeural"
-    rate: "+0%"
+    rate: "+14%"
     font_family: "Plus Jakarta Sans, Montserrat, sans-serif"
     youtube_category_id: "27"
     youtube_token_file: "token_us.json"
@@ -35,7 +35,7 @@ markets:
     language: "ja"
     locale: "ja-JP"
     voice: "ja-JP-KeitaNeural"
-    rate: "-2%"
+    rate: "+12%"
     font_family: "Noto Sans JP, Hiragino Kaku Gothic ProN, sans-serif"
     youtube_category_id: "27"
     youtube_token_file: "token_jp.json"
@@ -43,13 +43,13 @@ markets:
     language: "vi"
     locale: "vi-VN"
     voice: "vi-VN-NamMinhNeural"
-    rate: "-5%"
+    rate: "+18%"
     font_family: "Be Vietnam Pro, Montserrat, sans-serif"
     youtube_category_id: "22"
     youtube_token_file: "token.json"
 
 render:
-  crossfade_seconds: 0.5
+  crossfade_seconds: 0.18
   kenburns_end_scale: 1.1
   subtitle:
     font_family: "Plus Jakarta Sans, Noto Sans JP, Be Vietnam Pro, Montserrat, sans-serif"

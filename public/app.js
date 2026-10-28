@@ -230,6 +230,9 @@ function setupEventListeners() {
   // Upload up to 8 reference images
   document.getElementById('vgRefInput')?.addEventListener('change', handleVgRefUpload);
 
+  // Studio Voice Preview Button
+  document.getElementById('btnPreviewVoice')?.addEventListener('click', previewStudioVoice);
+
   // Video Gen Action Buttons
   document.getElementById('vgPlanBtn')?.addEventListener('click', vgPlanScenes);
   document.getElementById('vgAddBatchBtn')?.addEventListener('click', vgAddBatchToQueue);
@@ -392,6 +395,12 @@ function getVgCommonPayload() {
   const titleEl = document.getElementById('vgTitle');
   const lessonEl = document.getElementById('vgLessonText');
   const projectEl = document.getElementById('vgFilmProjectSelect');
+  const voiceEl = document.getElementById('vgVoice');
+  const voiceRateEl = document.getElementById('vgVoiceRate');
+
+  const voice = voiceEl?.value || 'vi-VN-NamMinhNeural';
+  const voiceRate = voiceRateEl?.value || '+20%';
+  const market = voice.startsWith('en-') ? 'US' : voice.startsWith('ja-') ? 'JP' : 'VI';
 
   return {
     kind: kindEl?.value || 'psych_split',
@@ -403,8 +412,51 @@ function getVgCommonPayload() {
     title: titleEl?.value?.trim() || 'TÍNH CÁCH PHẢN BÁC',
     lessonText: lessonEl?.value?.trim() || '',
     projectId: projectEl?.value || null,
+    voice,
+    voiceRate,
+    market,
     refs: (vgUploadedRefs || []).map(r => r.ref || r.path || r.url).filter(Boolean)
   };
+}
+
+async function previewStudioVoice() {
+  const btn = document.getElementById('btnPreviewVoice');
+  const player = document.getElementById('vgVoicePreviewPlayer');
+  const common = getVgCommonPayload();
+  const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
+  const firstSentence = rawScript.split(/(?<=[.!?…。！？])\s+/)[0] || '';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang tạo giọng...';
+  }
+  try {
+    const res = await fetch('/api/video-gen/tts-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: firstSentence.slice(0, 260),
+        voice: common.voice,
+        voiceRate: common.voiceRate
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không tạo được giọng đọc thử');
+    const audioUrl = json.audioUrl || json.data?.audioUrl;
+    if (player && audioUrl) {
+      player.src = audioUrl;
+      player.hidden = false;
+      player.play().catch(() => {});
+    }
+    showToast(`🔊 Đã tạo bản nghe thử Studio (${common.voice} • ${common.voiceRate})`);
+  } catch (err) {
+    alert('Lỗi nghe thử giọng đọc: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🔊 Nghe thử';
+    }
+  }
 }
 
 async function vgPlanScenes() {
@@ -482,8 +534,16 @@ async function vgInstantRenderCurrent() {
 }
 
 async function vgRenderOnlyById(projectId) {
-  showToast('⚡ Đang chạy Edge-TTS + Remotion Render cho dự án...');
-  const res = await fetch(`/api/video-gen/${projectId}/render-only`, { method: 'POST' });
+  const common = getVgCommonPayload();
+  showToast(`⚡ Đang tạo giọng Neural Studio (${common.voiceRate}) + Remotion Render...`);
+  const res = await fetch(`/api/video-gen/${projectId}/render-only`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      voice: common.voice,
+      voiceRate: common.voiceRate
+    })
+  });
   const json = await res.json();
   if (!json.success) throw new Error(json.error);
 
@@ -493,7 +553,7 @@ async function vgRenderOnlyById(projectId) {
   vgRenderProject(json.data);
   await loadVgQueue();
   await loadUnifiedLibrary();
-  showToast('✅ Đã Render MP4 hoàn tất!');
+  showToast('✅ Đã Render MP4 hoàn tất với giọng đọc Studio!');
 }
 
 async function vgAddBatchToQueue() {
@@ -563,6 +623,7 @@ function vgRenderProject(project) {
         ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split(/[\\/]/).pop())}" controls muted></video>` : ''}
         <p style="color: #f8fafc; font-weight: 600;">🇻🇳 ${escapeHtml(scene.text)}</p>
         ${scene.textEn ? `<p style="font-size: 11.5px; color: #94a3b8;">🇬🇧 ${escapeHtml(scene.textEn)}</p>` : ''}
+        ${scene.audioFile ? `<audio controls preload="none" src="/${escapeHtml(scene.audioFile)}?t=${Date.now()}" style="width:100%; height:28px; margin-top:4px;"></audio>` : ''}
         <div style="display:flex; gap:6px; margin-top:6px;">
           <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại Media</button>
         </div>
@@ -616,7 +677,15 @@ async function vgGenerateAndRender() {
   }, 4000);
 
   try {
-    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, { method: 'POST' });
+    const common = getVgCommonPayload();
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        voice: common.voice,
+        voiceRate: common.voiceRate
+      })
+    });
     const json = await res.json();
     if (!json.success) return alert(json.error);
     vgRenderProject(json.data);

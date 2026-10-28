@@ -270,6 +270,36 @@
               </div>
             </div>
 
+            <div class="form-grid-2" style="align-items:end;">
+              <div class="form-group">
+                <label>🎙️ Giọng đọc Neural Studio (Đã bật lọc âm & cắt khoảng nghỉ):</label>
+                <select id="vgVoice" class="form-select">
+                  <option value="vi-VN-NamMinhNeural" selected>🇻🇳 Nam Minh Studio (Nam Trầm Ấm · Tâm lý / Triết lý)</option>
+                  <option value="vi-VN-HoaiMyNeural">🇻🇳 Hoài My Studio (Nữ Sắc Sảo · Hiện đại / Review)</option>
+                  <option value="en-US-BrianNeural">🇺🇸 Brian US (Nam Mỹ Nhanh Gọn · Viral Shorts)</option>
+                  <option value="en-US-AndrewMultilingualNeural">🇺🇸 Andrew US (Nam Mỹ Trầm Ấm · Storytelling)</option>
+                  <option value="en-US-AvaMultilingualNeural">🇺🇸 Ava US (Nữ Mỹ Tự Nhiên · Tâm lý)</option>
+                  <option value="ja-JP-KeitaNeural">🇯🇵 Keita JP (Nam Nhật Rõ Ràng · Giải thích)</option>
+                  <option value="ja-JP-NanamiNeural">🇯🇵 Nanami JP (Nữ Nhật Tự Nhiên · Kể chuyện)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>⚡ Tốc độ & Nhịp điệu giọng đọc:</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <select id="vgVoiceRate" class="form-select" style="flex:1;">
+                    <option value="+20%" selected>⚡ Nhanh & Gãy gọn (1.2x · Chuẩn TikTok/Shorts)</option>
+                    <option value="+15%">🔥 Nhanh vừa (1.15x · Tự nhiên, cuốn hút)</option>
+                    <option value="+26%">🚀 Cực nhanh (1.26x · Nhịp dồn dập / Review)</option>
+                    <option value="+8%">🎧 Điềm tĩnh (1.08x · Kể chuyện sâu lắng)</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btnPreviewVoice" style="white-space:nowrap;height:38px;">
+                    🔊 Nghe thử
+                  </button>
+                </div>
+                <audio id="vgVoicePreviewPlayer" controls hidden style="width:100%;height:32px;margin-top:6px;"></audio>
+              </div>
+            </div>
+
             <div class="form-group">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                 <label style="margin:0;">Chế độ nhập Kịch bản / Prompt:</label>
