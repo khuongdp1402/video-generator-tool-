@@ -1135,7 +1135,7 @@ app.post(
 
       let scenes;
       try {
-        const { page } = await connectToGeminiPage();
+        const { page } = await connectToGeminiPage(undefined, 1500, false);
         scenes = await planScenes(page, rawScript, kind, {
           layoutMode: project.layoutMode,
           targetDuration: project.targetDuration,
@@ -1480,7 +1480,12 @@ app.post(
       res.json({ success: true, data: updated });
     } catch (err) {
       console.error('Lỗi retry scene:', err);
-      res.status(500).json({ error: err.message });
+      const rawMsg = String(err.message || err);
+      const friendlyMsg =
+        rawMsg.includes('ECONNREFUSED') || rawMsg.includes('Timeout') || rawMsg.includes('waitFor')
+          ? 'Đã mở cửa sổ Chrome AI (cổng 9222). Bạn hãy đăng nhập tài khoản Gemini/Muse trên cửa sổ Chrome vừa bật để tạo video Veo AI, hoặc bấm nút xanh lá "⚡ Render Nhanh Remotion" để xuất MP4 ngay bằng đồ họa dựng sẵn (không cần tài khoản).'
+          : rawMsg;
+      res.status(500).json({ error: friendlyMsg });
     }
   })
 );

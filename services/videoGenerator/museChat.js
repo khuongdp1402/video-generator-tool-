@@ -53,11 +53,34 @@ async function connectToMusePage(opts = {}) {
   try {
     browser = await chromium.connectOverCDP(cdpUrl);
   } catch (err) {
-    throw new Error(
-      `Không kết nối được Chrome qua cổng Debug (${cdpUrl}). ` +
-        `Hãy mở Chrome bằng lệnh: /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222 ` +
-        `và đăng nhập sẵn tài khoản Muse (${targetUrl}). Chi tiết: ${err.message}`
-    );
+    if (opts.autoLaunch !== false && String(err.message || '').includes('ECONNREFUSED')) {
+      const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      if (fs.existsSync(chromePath)) {
+        const { spawn } = require('child_process');
+        const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
+        if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+        const child = spawn(
+          chromePath,
+          [
+            '--remote-debugging-port=9222',
+            `--user-data-dir=${profileDir}`,
+            '--no-first-run',
+            '--no-default-browser-check',
+            targetUrl,
+          ],
+          { detached: true, stdio: 'ignore' }
+        );
+        child.unref();
+        await new Promise((r) => setTimeout(r, 2600));
+        browser = await chromium.connectOverCDP(cdpUrl, { timeout: 6000 });
+      }
+    }
+    if (!browser) {
+      throw new Error(
+        `Không kết nối được Chrome qua cổng Debug (${cdpUrl}). ` +
+          `Hệ thống đã thử tự mở Chrome AI Profile nhưng chưa sẵn sàng. Hãy đăng nhập sẵn tài khoản trên cửa sổ Chrome vừa mở (${targetUrl}). Chi tiết: ${err.message}`
+      );
+    }
   }
 
   const context = browser.contexts()[0];

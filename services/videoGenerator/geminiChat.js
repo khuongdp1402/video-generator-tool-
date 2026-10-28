@@ -1,10 +1,50 @@
 // services/videoGenerator/geminiChat.js
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
 const DEFAULT_CDP_URL = 'http://localhost:9222';
 const GEMINI_URL = 'https://gemini.google.com/app';
 
-async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL, timeout = 2500) {
+async function ensureChromeCdpRunning(startUrl = GEMINI_URL) {
+  const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (!fs.existsSync(chromePath)) return false;
+  const profileDir = path.resolve(__dirname, '..', '..', 'storage', 'chrome-muse-profile');
+  if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+  const child = spawn(
+    chromePath,
+    [
+      '--remote-debugging-port=9222',
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      startUrl,
+    ],
+    { detached: true, stdio: 'ignore' }
+  );
+  child.unref();
+  await new Promise((r) => setTimeout(r, 2500));
+  return true;
+}
+
+async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL, timeout = 2500, autoLaunch = true) {
   const { chromium } = require('playwright');
-  const browser = await chromium.connectOverCDP(cdpUrl, { timeout });
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(cdpUrl, { timeout });
+  } catch (err) {
+    if (autoLaunch && String(err.message || '').includes('ECONNREFUSED')) {
+      const launched = await ensureChromeCdpRunning(GEMINI_URL);
+      if (launched) {
+        browser = await chromium.connectOverCDP(cdpUrl, { timeout: 6000 });
+      } else {
+        throw err;
+      }
+    } else {
+      throw err;
+    }
+  }
   const context = browser.contexts()[0];
   if (!context) {
     throw new Error('Không tìm thấy Chrome context nào. Hãy mở Chrome với --remote-debugging-port=9222.');
@@ -12,7 +52,7 @@ async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL, timeout = 2500) {
   let page = context.pages().find((p) => p.url().includes('gemini.google.com'));
   if (!page) {
     page = await context.newPage();
-    await page.goto(GEMINI_URL, { waitUntil: 'networkidle' });
+    await page.goto(GEMINI_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   }
   return { browser, page };
 }
