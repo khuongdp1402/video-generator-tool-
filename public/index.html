@@ -301,17 +301,25 @@
             </div>
 
             <div class="form-group">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
                 <label style="margin:0;">Chế độ nhập Kịch bản / Prompt:</label>
-                <div class="segmented-btns">
-                  <button type="button" class="seg-btn active" id="vgModeSingle">1 Kịch bản đầy đủ</button>
-                  <button type="button" class="seg-btn" id="vgModeBatchLines">Nhiều dòng (Mỗi dòng 1 Task)</button>
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-primary btn-sm" id="btnOpenTopicSuggestModal" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;font-weight:700;padding:5px 12px;">
+                    💡 Gợi ý Kịch bản theo Chủ đề
+                  </button>
+                  <div class="segmented-btns">
+                    <button type="button" class="seg-btn active" id="vgModeSingle">1 Kịch bản đầy đủ</button>
+                    <button type="button" class="seg-btn" id="vgModeBatchLines">Nhiều dòng (Mỗi dòng 1 Task)</button>
+                  </div>
                 </div>
               </div>
               <textarea id="vgScriptInput" class="vf-textarea" rows="6" placeholder="Nhập kịch bản tiếng Việt (VD: Có một kiểu người, dù bạn nói gì đi nữa, phản xạ đầu tiên là cãi lại. Kể cả khi bạn rất có lý, họ vẫn tìm được góc oái oăm để bắt bẻ. Thật ra trong tâm lý học, kiểu người này thường được gọi là tính cách phản bác...)"></textarea>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;flex-wrap:wrap;gap:8px;">
                 <label class="file-chip-btn">📂 Nhập từ file .TXT <input type="file" id="vgTxtFile" accept=".txt" hidden></label>
-                <button type="button" class="btn-link" id="btnFillSamplePsych">✨ Điền mẫu kịch bản "Tính Cách Phản Bác (Lành Tâm)"</button>
+                <div style="display:flex;gap:12px;align-items:center;">
+                  <button type="button" class="btn-link" id="btnQuickRandomTopic">🎲 Tự sinh nhanh 1 kịch bản theo phong cách đang chọn</button>
+                  <button type="button" class="btn-link" id="btnFillSamplePsych">✨ Mẫu "Tính Cách Phản Bác"</button>
+                </div>
               </div>
             </div>
 
@@ -1069,6 +1077,40 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Popup Modal: Gợi ý Chủ đề & Tự Sinh Kịch bản theo Phong cách đã chọn -->
+  <div id="topicSuggestModal" class="topic-modal-backdrop" hidden>
+    <div class="topic-modal-dialog">
+      <div class="topic-modal-header">
+        <div>
+          <span class="step-pill">AI SCRIPT GENERATOR</span>
+          <h3 style="display:inline;margin-left:8px;">💡 Chọn Chủ Đề (Topic) Để Tự Sinh Kịch Bản & Prompt</h3>
+          <p style="margin:4px 0 0;font-size:12.5px;color:var(--text-muted);">
+            Tự động lọc chủ đề khớp với phong cách bạn đang chọn ở Bước 1. Bấm vào 1 chủ đề bất kỳ để tự điền Kịch bản, Tiêu đề & Bài học ngay lập tức!
+          </p>
+        </div>
+        <button type="button" class="topic-modal-close" id="btnCloseTopicModal" title="Đóng">✕</button>
+      </div>
+
+      <!-- Thanh nhập chủ đề / từ khóa tự do -->
+      <div class="topic-custom-bar">
+        <input
+          type="text"
+          id="customTopicKeywordInput"
+          placeholder="Hoặc nhập chủ đề bất kỳ bạn muốn test (VD: Thao túng tâm lý, Trì hoãn, Kỷ luật thép, Nghiện điện thoại...)"
+        />
+        <button type="button" class="btn btn-primary" id="btnGenerateCustomTopicScript">
+          ⚡ Tự Sinh Kịch Bản Từ Chủ Đề Này
+        </button>
+      </div>
+
+      <!-- Bộ lọc Phong cách (tự động đồng bộ với #vgKind) -->
+      <div id="topicModalStyleTabs" class="topic-style-tabs"></div>
+
+      <!-- Danh sách thẻ Chủ đề gợi ý -->
+      <div id="topicModalCardsGrid" class="topic-cards-grid"></div>
+    </div>
   </div>
 
   <div id="studio-toast" class="studio-toast hidden"></div>

@@ -79,6 +79,7 @@ const { renderProject } = require('./services/videoGenerator/render');
 const { extractContinuityFrame } = require('./services/videoGenerator/continuity');
 const filmStore = require('./services/videoGenerator/filmProjects');
 const promptWriterStore = require('./services/videoGenerator/promptWriter');
+const { getTopicCatalog, generateScriptByTopic } = require('./services/videoGenerator/topicScriptSuggester');
 const accountManager = require('./services/accountManager');
 
 const MEDIA_DIR = path.join(__dirname, 'my-video-engine', 'public', 'media');
@@ -434,6 +435,26 @@ app.post('/api/targets', (req, res) => {
 });
 
 // 22a. Kiểm tra trạng thái kết nối AgentGW API + danh sách thị trường US/JP/VI
+app.get('/api/video-gen/topic-suggestions', (req, res) => {
+  try {
+    const kind = req.query.kind || 'psych_split';
+    const data = getTopicCatalog(kind);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/video-gen/generate-topic-script', async (req, res) => {
+  try {
+    const { kind = 'psych_split', topicId = '', customTopic = '', variantIndex = null } = req.body || {};
+    const generated = generateScriptByTopic({ kind, topicId, customTopic, variantIndex });
+    res.json({ success: true, data: generated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/agentgw/status', async (req, res) => {
   try {
     const cfg = getAgentGwConfig();

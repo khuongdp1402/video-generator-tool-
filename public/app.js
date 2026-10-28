@@ -233,6 +233,29 @@ function setupEventListeners() {
   // Studio Voice Preview Button
   document.getElementById('btnPreviewVoice')?.addEventListener('click', previewStudioVoice);
 
+  // Topic Suggestion Popup Modal & Auto Script Generator
+  document.getElementById('btnOpenTopicSuggestModal')?.addEventListener('click', openTopicSuggestModal);
+  document.getElementById('btnCloseTopicModal')?.addEventListener('click', closeTopicSuggestModal);
+  document.getElementById('topicSuggestModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'topicSuggestModal') closeTopicSuggestModal();
+  });
+  document.getElementById('btnGenerateCustomTopicScript')?.addEventListener('click', () => {
+    const kw = (document.getElementById('customTopicKeywordInput')?.value || '').trim();
+    if (!kw) return alert('Vui lòng nhập chủ đề hoặc từ khóa bạn muốn tự sinh kịch bản!');
+    const activeKind = topicCatalogState.activeKind || document.getElementById('vgKind')?.value || 'psych_split';
+    selectTopicAndGenerateScript(activeKind, '', kw, false);
+  });
+  document.getElementById('customTopicKeywordInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('btnGenerateCustomTopicScript')?.click();
+    }
+  });
+  document.getElementById('btnQuickRandomTopic')?.addEventListener('click', () => {
+    const activeKind = document.getElementById('vgKind')?.value || 'psych_split';
+    selectTopicAndGenerateScript(activeKind, '', '', false);
+  });
+
   // Video Gen Action Buttons
   document.getElementById('vgPlanBtn')?.addEventListener('click', vgPlanScenes);
   document.getElementById('vgAddBatchBtn')?.addEventListener('click', vgAddBatchToQueue);
@@ -456,6 +479,145 @@ async function previewStudioVoice() {
       btn.disabled = false;
       btn.innerText = '🔊 Nghe thử';
     }
+  }
+}
+
+let topicCatalogState = {
+  activeKind: 'psych_split',
+  categories: []
+};
+
+async function openTopicSuggestModal() {
+  const modal = document.getElementById('topicSuggestModal');
+  if (!modal) return;
+  const currentKind = document.getElementById('vgKind')?.value || 'psych_split';
+  topicCatalogState.activeKind = currentKind;
+  modal.hidden = false;
+
+  try {
+    const res = await fetch(`/api/video-gen/topic-suggestions?kind=${encodeURIComponent(currentKind)}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không tải được danh sách chủ đề');
+    topicCatalogState.categories = json.data.categories || [];
+    topicCatalogState.activeKind = json.data.activeKind || currentKind;
+    renderTopicSuggestModal();
+  } catch (err) {
+    alert('Lỗi tải gợi ý chủ đề: ' + err.message);
+  }
+}
+
+function closeTopicSuggestModal() {
+  const modal = document.getElementById('topicSuggestModal');
+  if (modal) modal.hidden = true;
+}
+
+function switchTopicModalStyle(kind) {
+  topicCatalogState.activeKind = kind;
+  renderTopicSuggestModal();
+}
+
+function renderTopicSuggestModal() {
+  const tabsWrap = document.getElementById('topicModalStyleTabs');
+  const cardsGrid = document.getElementById('topicModalCardsGrid');
+  if (!tabsWrap || !cardsGrid) return;
+
+  const categories = topicCatalogState.categories || [];
+  const activeCat = categories.find(c => c.kind === topicCatalogState.activeKind) || categories[0];
+
+  tabsWrap.innerHTML = categories.map(cat => `
+    <button
+      type="button"
+      class="topic-style-tab ${cat.kind === activeCat?.kind ? 'active' : ''}"
+      onclick="switchTopicModalStyle('${escapeHtml(cat.kind)}')"
+    >
+      ${escapeHtml(cat.label)} (${(cat.topics || []).length})
+    </button>
+  `).join('');
+
+  if (!activeCat || !(activeCat.topics || []).length) {
+    cardsGrid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--text-muted);">Chưa có chủ đề cho phong cách này.</div>`;
+    return;
+  }
+
+  cardsGrid.innerHTML = activeCat.topics.map(topic => `
+    <div class="topic-card" onclick="selectTopicAndGenerateScript('${escapeHtml(activeCat.kind)}', '${escapeHtml(topic.id)}', '', false)">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <span class="topic-card-badge">${escapeHtml(topic.badge || '🔥 Chủ đề Hot')}</span>
+          <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(activeCat.defaultChannel || '')}</span>
+        </div>
+        <h4>${escapeHtml(topic.title)}</h4>
+        <p>${escapeHtml(topic.summary)}</p>
+      </div>
+      <div class="topic-card-actions" onclick="event.stopPropagation();">
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          style="flex:1;"
+          onclick="selectTopicAndGenerateScript('${escapeHtml(activeCat.kind)}', '${escapeHtml(topic.id)}', '', false)"
+        >
+          ✍️ Chọn & Điền Kịch Bản
+        </button>
+        <button
+          type="button"
+          class="btn btn-emerald btn-sm"
+          title="Tự điền kịch bản và chạy Render Nhanh luôn"
+          onclick="selectTopicAndGenerateScript('${escapeHtml(activeCat.kind)}', '${escapeHtml(topic.id)}', '', true)"
+        >
+          ⚡ Render Luôn
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function selectTopicAndGenerateScript(kind, topicId = '', customTopic = '', autoRender = false) {
+  try {
+    const res = await fetch('/api/video-gen/generate-topic-script', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, topicId, customTopic })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không thể sinh kịch bản từ chủ đề');
+
+    const data = json.data;
+    // Đồng bộ phong cách nếu người dùng chọn chủ đề ở tab phong cách khác
+    const kindEl = document.getElementById('vgKind');
+    if (kindEl && data.kind && kindEl.value !== data.kind) {
+      kindEl.value = data.kind;
+      kindEl.dispatchEvent(new Event('change'));
+    }
+
+    const channelEl = document.getElementById('vgChannelName');
+    if (channelEl && data.channelName) channelEl.value = data.channelName;
+
+    const titleEl = document.getElementById('vgTitle');
+    if (titleEl && data.videoTitle) titleEl.value = data.videoTitle;
+
+    const lessonEl = document.getElementById('vgLessonText');
+    if (lessonEl && data.lessonText) lessonEl.value = data.lessonText;
+
+    const scriptInput = document.getElementById('vgScriptInput');
+    if (scriptInput) {
+      if (vgInputMode === 'batch' && Array.isArray(data.batchLines) && data.batchLines.length > 0) {
+        scriptInput.value = data.batchLines.join('\n');
+      } else {
+        scriptInput.value = data.script || '';
+      }
+    }
+
+    // Reset current project ID so Instant Render plans fresh scenes for this new script
+    vgCurrentProjectId = null;
+
+    closeTopicSuggestModal();
+    showToast(`💡 Đã tự sinh kịch bản chủ đề: "${data.topicTitle}"!`);
+
+    if (autoRender) {
+      await vgInstantRenderCurrent();
+    }
+  } catch (err) {
+    alert('Lỗi tự sinh kịch bản: ' + err.message);
   }
 }
 
