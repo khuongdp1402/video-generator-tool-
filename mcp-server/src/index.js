@@ -90,22 +90,22 @@ const sceneInputSchema = z.object({
 server.registerTool(
   "generate_scenario_from_topic",
   {
-    title: "Generate scenario from a topic (AI Brain)",
+    title: "Generate scenario from a topic (AI Brain - AgentGW / Gemini)",
     description:
-      "Runs the Gemini-based AI Brain (ai_generator.py) with its auto-scoring loop (Hook/Pacing/Loopability, " +
-      "regenerates until score >= threshold) to turn a raw topic/idea into a full scene breakdown, and writes " +
-      "it straight into video_data.json. Requires GEMINI_API_KEY in my-video-engine/.env. Use this instead of " +
-      "save_scenario when you want the Python AI Brain to write the script; use save_scenario when you (the " +
-      "calling agent) already wrote the scenes yourself.",
+      "Runs the AI Brain (ai_generator.py via AgentGW Claude Opus 4.8 or Gemini fallback) with its auto-scoring loop " +
+      "(Hook/Pacing/Loopability) to turn a raw topic/idea into a full scene breakdown for US (en-US), Japan (ja-JP), " +
+      "or Vietnam (vi-VN) YouTube markets, and writes it straight into video_data.json.",
     inputSchema: {
       topic: z.string().min(1),
+      market: z.enum(["US", "JP", "VI"]).optional().default("US"),
     },
   },
-  async ({ topic }) => {
+  async ({ topic, market }) => {
     try {
-      const { stdout, stderr } = await runPython(["main.py", "script", topic]);
+      const m = (market || "US").toUpperCase();
+      const { stdout, stderr } = await runPython(["main.py", "script", topic, "--market", m]);
       const data = await readScenario();
-      return textResult({ ok: true, scenesWritten: data.scenes.length, stdout, stderr });
+      return textResult({ ok: true, market: m, scenesWritten: data.scenes.length, meta: data.meta, stdout, stderr });
     } catch (err) {
       return errorResult(`Scenario generation failed: ${err.message}\n${err.stderr ?? ""}`);
     }
@@ -118,16 +118,17 @@ server.registerTool(
     title: "Save video scenario",
     description:
       "Write a scene breakdown you (the calling agent) already produced from a raw script into video_data.json. " +
-      "Each scene needs an imagePrompt (still image only, no motion — Ken Burns zoom is added in render). " +
-      "Duration is estimated from word count and corrected by generate_all_voiceovers once real audio exists.",
+      "Supports market ('US', 'JP', 'VI') and aspectRatio ('16:9', '9:16').",
     inputSchema: {
       title: z.string(),
+      market: z.enum(["US", "JP", "VI"]).optional(),
+      aspectRatio: z.enum(["16:9", "9:16"]).optional(),
       voice: z.string().optional(),
       voiceRate: z.string().optional(),
       scenes: z.array(sceneInputSchema).min(1),
     },
   },
-  async ({ title, voice, voiceRate, scenes }) => {
+  async ({ title, market, aspectRatio, voice, voiceRate, scenes }) => {
     let existingScenesById = new Map();
     try {
       const prior = await readScenario();
@@ -136,11 +137,23 @@ server.registerTool(
       // No prior scenario on disk yet — every scene is new, nothing to carry forward.
     }
 
+    const marketDefaults = {
+      US: { language: "en", locale: "en-US", voice: "en-US-AndrewMultilingualNeural", voiceRate: "+0%" },
+      JP: { language: "ja", locale: "ja-JP", voice: "ja-JP-KeitaNeural", voiceRate: "-2%" },
+      VI: { language: "vi", locale: "vi-VN", voice: "vi-VN-NamMinhNeural", voiceRate: "-5%" },
+    };
+    const mKey = (market || "US").toUpperCase();
+    const mDef = marketDefaults[mKey] || marketDefaults.US;
+
     const data = {
       meta: {
         title,
-        ...(voice ? { voice } : {}),
-        ...(voiceRate ? { voiceRate } : {}),
+        market: mKey,
+        language: mDef.language,
+        locale: mDef.locale,
+        aspectRatio: aspectRatio || "9:16",
+        voice: voice || mDef.voice,
+        voiceRate: voiceRate || mDef.voiceRate,
       },
       scenes: scenes.map((s) => {
         const existing = existingScenesById.get(s.id);
@@ -148,9 +161,6 @@ server.registerTool(
         return {
           id: s.id,
           text: s.text,
-          // Only carry forward audio/media from a prior save if this scene's
-          // text is unchanged — otherwise stale narration would no longer
-          // match what's on screen. New/edited scenes always start blank.
           audioFile: textUnchanged ? existing.audioFile || "" : "",
           durationInFrames: textUnchanged ? existing.durationInFrames : estimateDurationFrames(s.text),
           ...(s.highlightWords ? { highlightWords: s.highlightWords } : {}),
@@ -165,6 +175,7 @@ server.registerTool(
     await writeScenario(data);
     return textResult({
       ok: true,
+      market: mKey,
       scenesWritten: data.scenes.length,
       dataFile: DATA_FILE,
       next: "Call generate_all_voiceovers, then get_scenario_status to see which scenes still need media.",
@@ -298,22 +309,27 @@ server.registerTool(
   {
     title: "Upload video via an official platform API",
     description:
-      "Runs uploader.py to publish a rendered video through YouTube's Data API v3 (OAuth, your own app) or " +
-      "TikTok's Content Posting API (requires an approved developer app + TIKTOK_ACCESS_TOKEN). Does not use " +
-      "anti-detect browsers or any bot-detection-evasion technique.",
+      "Runs uploader.py to publish a rendered video through YouTube's Data API v3 (OAuth, supports US/JP/VI channels) " +
+      "or TikTok's Content Posting API (requires an approved developer app + TIKTOK_ACCESS_TOKEN).",
     inputSchema: {
       platform: z.enum(["youtube", "tiktok"]),
       videoPath: z.string(),
       title: z.string(),
       description: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      market: z.enum(["US", "JP", "VI"]).optional().default("US"),
     },
   },
-  async ({ platform, videoPath, title, description }) => {
-    const args = ["main.py", "upload", platform, videoPath, "--title", title];
+  async ({ platform, videoPath, title, description, tags, market }) => {
+    const m = (market || "US").toUpperCase();
+    const args = ["main.py", "upload", platform, videoPath, "--title", title, "--market", m];
     if (description) args.push("--description", description);
+    if (Array.isArray(tags) && tags.length > 0) {
+      args.push("--tags", ...tags);
+    }
     try {
       const { stdout, stderr } = await runPython(args);
-      return textResult({ ok: true, stdout, stderr });
+      return textResult({ ok: true, market: m, stdout, stderr });
     } catch (err) {
       return errorResult(`Upload failed: ${err.message}\n${err.stderr ?? ""}`);
     }

@@ -19,3 +19,14 @@ test('handdrawn prompt embeds the hand-drawn style block', () => {
 test('rejects an empty script', () => {
   assert.throws(() => buildDirectorPrompt('   ', 'story'), /kịch bản/i);
 });
+
+test('builds US and JP market-specific director prompts', () => {
+  const usPrompt = buildDirectorPrompt('Focus on compound habits every day.', 'story', 'US');
+  assert.match(usPrompt, /American English/i);
+  assert.match(usPrompt, /en-US/);
+
+  const jpPrompt = buildDirectorPrompt('毎日の小さな習慣が人生を変える。', 'handdrawn', 'JP');
+  assert.match(jpPrompt, /日本語/);
+  assert.match(jpPrompt, /ja-JP/);
+});
+

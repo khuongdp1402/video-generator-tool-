@@ -14,16 +14,45 @@ whisper:
   model: "base"
 
 ai:
-  model: "gemini-1.5-pro"
+  provider: "agentgw"
+  base_url: "https://agentgw.cloud/v1"
+  model: "agentgw-opus-4-8"
+  fallback_model: "gemini-1.5-pro"
   num_scenes: 7
   min_score: 85
   max_attempts: 3
+
+markets:
+  US:
+    language: "en"
+    locale: "en-US"
+    voice: "en-US-AndrewMultilingualNeural"
+    rate: "+0%"
+    font_family: "Plus Jakarta Sans, Montserrat, sans-serif"
+    youtube_category_id: "27"
+    youtube_token_file: "token_us.json"
+  JP:
+    language: "ja"
+    locale: "ja-JP"
+    voice: "ja-JP-KeitaNeural"
+    rate: "-2%"
+    font_family: "Noto Sans JP, Hiragino Kaku Gothic ProN, sans-serif"
+    youtube_category_id: "27"
+    youtube_token_file: "token_jp.json"
+  VI:
+    language: "vi"
+    locale: "vi-VN"
+    voice: "vi-VN-NamMinhNeural"
+    rate: "-5%"
+    font_family: "Be Vietnam Pro, Montserrat, sans-serif"
+    youtube_category_id: "22"
+    youtube_token_file: "token.json"
 
 render:
   crossfade_seconds: 0.5
   kenburns_end_scale: 1.1
   subtitle:
-    font_family: "Be Vietnam Pro, Montserrat, sans-serif"
+    font_family: "Plus Jakarta Sans, Noto Sans JP, Be Vietnam Pro, Montserrat, sans-serif"
     font_size_px: 64
     stroke_px: 6
     highlight_color: "#FFD400"
@@ -37,7 +66,7 @@ paths:
 
 youtube:
   privacy_status: "private" # private | unlisted | public
-  category_id: "22"
+  category_id: "27"
 
 tiktok:
   privacy_level: "SELF_ONLY" # SELF_ONLY | PUBLIC_TO_EVERYONE | MUTUAL_FOLLOW_FRIENDS

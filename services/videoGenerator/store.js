@@ -1,6 +1,7 @@
 // services/videoGenerator/store.js
 const fs = require('fs');
 const path = require('path');
+const { getMarketPreset } = require('./stylePresets');
 
 const VALID_KINDS = ['story', 'handdrawn', 'minimalist'];
 
@@ -21,22 +22,41 @@ function createStore(dataFile) {
     fs.writeFileSync(dataFile, JSON.stringify(db, null, 2));
   }
 
-  function createProject({ kind, aspectRatio, rawScript, lessonText = '', title = '', meta = {}, scenes = [] }) {
+  let seq = 0;
+  function createProject({
+    kind,
+    aspectRatio,
+    rawScript,
+    market = 'VI',
+    voice,
+    voiceRate,
+    lessonText = '',
+    title = '',
+    youtubeMeta = null,
+    meta = {},
+    scenes = [],
+  }) {
     if (!VALID_KINDS.includes(kind)) {
       throw new Error(`Unknown kind: ${kind}`);
     }
+    const marketPreset = getMarketPreset(market);
     const now = new Date().toISOString();
+    seq += 1;
     const project = {
-      id: `gp_${Date.now()}`,
+      id: `gp_${Date.now()}${seq > 1 ? String(seq) : ''}`,
       kind,
+      market: marketPreset.code,
       aspectRatio,
       title: title || '',
       rawScript,
       lessonText,
+      youtubeMeta: youtubeMeta || null,
       meta: {
         theme: kind === 'handdrawn' || kind === 'minimalist' ? 'warm-orange' : 'dark-cyan',
-        voice: 'vi-VN-NamMinhNeural',
-        voiceRate: '+0%',
+        language: marketPreset.language,
+        locale: marketPreset.locale,
+        voice: voice || marketPreset.defaultVoice,
+        voiceRate: voiceRate || marketPreset.defaultVoiceRate || '+0%',
         bgMusic: '',
         ...meta,
       },
@@ -64,7 +84,11 @@ function createStore(dataFile) {
     if (!project) {
       throw new Error(`Không tìm thấy project ${id}`);
     }
-    Object.assign(project, updates, { updatedAt: new Date().toISOString() });
+    let nextTime = new Date().toISOString();
+    if (nextTime === project.updatedAt) {
+      nextTime = new Date(Date.now() + 1).toISOString();
+    }
+    Object.assign(project, updates, { updatedAt: nextTime });
     saveDb(db);
     return project;
   }

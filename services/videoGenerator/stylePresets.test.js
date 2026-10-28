@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getStylePreset, getDimensions } = require('./stylePresets');
+const { getStylePreset, getDimensions, getMarketPreset } = require('./stylePresets');
 
 test('story preset has no hand-drawn keywords', () => {
   const preset = getStylePreset('story');
@@ -28,3 +28,16 @@ test('getDimensions maps aspect ratios to the sizes Remotion renders at', () => 
 test('getDimensions rejects an unknown ratio', () => {
   assert.throws(() => getDimensions('1:1'), /Unknown aspectRatio/);
 });
+
+test('getMarketPreset returns US and JP presets with native neural voices and locales', () => {
+  const us = getMarketPreset('US');
+  assert.equal(us.locale, 'en-US');
+  assert.equal(us.defaultVoice, 'en-US-AndrewMultilingualNeural');
+  assert.equal(us.lessonTitle, 'Key Takeaway');
+
+  const jp = getMarketPreset('JP');
+  assert.equal(jp.locale, 'ja-JP');
+  assert.equal(jp.defaultVoice, 'ja-JP-KeitaNeural');
+  assert.equal(jp.lessonTitle, '今日の教訓');
+});
+

@@ -30,6 +30,19 @@ test('createProject returns a project with the expected shape and defaults', () 
   assert.equal(project.createdAt, project.updatedAt);
 });
 
+test('createProject configures US and JP market defaults', () => {
+  const store = createStore(tempDataFile());
+  const jpProject = store.createProject({
+    kind: 'story',
+    aspectRatio: '16:9',
+    rawScript: '毎日の習慣が未来を作る。',
+    market: 'JP',
+  });
+  assert.equal(jpProject.market, 'JP');
+  assert.equal(jpProject.meta.locale, 'ja-JP');
+  assert.equal(jpProject.meta.voice, 'ja-JP-KeitaNeural');
+});
+
 test('createProject rejects an unknown kind', () => {
   const store = createStore(tempDataFile());
   assert.throws(

@@ -436,51 +436,147 @@
         </div>
       </section>
 
-      <!-- TAB 6: TẠO VIDEO AI (Gemini Ultra + Remotion) -->
+      <!-- TAB 6: TẠO VIDEO AI QUỐC TẾ (Muse.ai + AgentGW + US / JP / VI YouTube) -->
       <section id="tab-video-gen" class="tab-content">
         <div class="card">
-          <div class="card-header">
-            <h3>Tạo Video Bằng AI (Kịch bản → Scene → Render)</h3>
-            <span class="badge badge-accent">Gemini Ultra + Remotion</span>
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <h3>Tạo Video YouTube Quốc Tế Bằng Muse.ai & AgentGW (US 🇺🇸 / Nhật Bản 🇯🇵 / VN 🇻🇳)</h3>
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                Kết nối tài khoản <b>Muse.ai</b> (tạo kịch bản & video AI trọn gói) + <b>AgentGW API</b> + Giọng đọc Neural bản địa + Phụ đề Karaoke CJK/Latin
+              </p>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+              <span id="vgMuseBadge" class="badge" style="border: 1px solid #a855f7; color: #c084fc;">🎬 Muse CDP: Đang kiểm tra...</span>
+              <span id="vgAgentGwBadge" class="badge badge-accent">⚡ AgentGW: Đang kiểm tra...</span>
+              <button class="btn btn-secondary" id="vgCheckQuotaBtn" style="padding: 4px 10px; font-size: 11.5px;">🔄 Kiểm tra kết nối</button>
+            </div>
           </div>
           <div class="card-body">
+            <!-- Box Kết nối Tài khoản Muse.ai (Chrome CDP 9222) -->
+            <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                <strong style="font-size: 13px; color: #c084fc;">
+                  🎬 Kết Nối Tài Khoản Muse.ai (Tạo Kịch Bản & Video AI Thay Thế Code)
+                </strong>
+                <span style="font-size: 11.5px; color: var(--text-muted);">
+                  Sử dụng trực tiếp tài khoản Muse.ai đã đăng nhập trên Chrome (Port 9222) — Không tốn phí API ngoài
+                </span>
+              </div>
+              <div class="input-group" style="margin-bottom: 10px;">
+                <input type="text" id="vgMuseUrl" value="https://muse.ai" placeholder="URL workspace Muse.ai của bạn (mặc định: https://muse.ai)" />
+                <button class="btn btn-secondary" id="vgOpenMuseBrowserBtn">🌐 Mở Chrome Kết Nối Muse.ai (Port 9222)</button>
+              </div>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="btn btn-primary" id="vgMuseFullBtn" style="background: linear-gradient(135deg, #9333ea, #6366f1); border: none; flex: 1;">
+                  🚀 Tạo Kịch Bản + Video AI Trọn Gói Từ Muse.ai (1-Click Full Video)
+                </button>
+              </div>
+            </div>
+
+            <!-- Hàng cấu hình Thị trường + Model + Giọng đọc -->
+            <div class="grid-2-col" style="margin-bottom: 14px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>🌍 Thị trường mục tiêu (Target Market):</label>
+                <select id="vgMarket" class="form-select">
+                  <option value="US">🇺🇸 Hoa Kỳ - YouTube US (English en-US | RPM cao)</option>
+                  <option value="JP">🇯🇵 Nhật Bản - YouTube Japan (日本語 ja-JP | Tỷ lệ giữ chân cao)</option>
+                  <option value="VI">🇻🇳 Việt Nam - YouTube VN (Tiếng Việt vi-VN)</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>🎙️ Giọng đọc Neural Bản địa (Edge / Google TTS):</label>
+                <select id="vgVoice" class="form-select">
+                  <option value="en-US-AndrewMultilingualNeural">Andrew Multilingual (Nam - US Storytelling)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="grid-2-col" style="margin-bottom: 14px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>🧠 Bộ não AI Đạo diễn & Chia Scene:</label>
+                <div style="display: flex; gap: 8px;">
+                  <select id="vgPlanEngine" class="form-select" style="flex: 1;">
+                    <option value="muse">🎬 Muse.ai (Tài khoản Muse trên Chrome 9222)</option>
+                    <option value="agentgw">⚡ AgentGW Cloud API (Claude / GPT)</option>
+                    <option value="playwright">🤖 Gemini Ultra (Chrome 9222)</option>
+                  </select>
+                  <select id="vgModel" class="form-select" style="flex: 1.2;">
+                    <option value="agentgw-opus-4-8">Claude Opus 4.8 (Bản địa hoá JP/US)</option>
+                    <option value="agentgw-gpt-5.5-xhigh">GPT-5.5 xHigh (Hook Viral US)</option>
+                    <option value="agentgw-sonnet-4-6">Claude Sonnet 4.6 (Nhanh)</option>
+                    <option value="agentgw-deepseek-v4-pro">DeepSeek V4 Pro</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>🎨 Phong cách & Khung hình:</label>
+                <div style="display: flex; gap: 8px;">
+                  <select id="vgKind" class="form-select" style="flex: 1.4;">
+                    <option value="story">Kịch bản (3D Pixar / Cinematic AI)</option>
+                    <option value="handdrawn">Hand-drawn 2D explainer</option>
+                  </select>
+                  <select id="vgAspectRatio" class="form-select" style="flex: 1;">
+                    <option value="16:9">Ngang 16:9 (YouTube Long)</option>
+                    <option value="9:16">Dọc 9:16 (Shorts / TikTok)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Box AI Viết / Bản địa hoá kịch bản tự động -->
+            <div style="background: rgba(56, 189, 248, 0.07); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+              <label style="display: block; font-size: 12.5px; font-weight: 600; color: #38bdf8; margin-bottom: 6px;">
+                ✨ Bước 1: Nhập Chủ Đề / Ý Tưởng (Dùng cho cả nút 1-Click Muse.ai hoặc AI Viết Kịch Bản Bản Địa)
+              </label>
+              <div class="input-group">
+                <input type="text" id="vgTopicInput" placeholder="Vd: Quy tắc 1% mỗi ngày của Atomic Habits / Tại sao người Nhật sống kỷ luật nhưng ít áp lực..." />
+                <button class="btn btn-primary" id="vgWriteScriptBtn">✨ AI Viết Kịch Bản Bản Địa</button>
+              </div>
+            </div>
+
             <div class="form-group">
-              <label>Loại video:</label>
-              <select id="vgKind" class="form-select">
-                <option value="story">Kịch bản (3D Pixar style)</option>
-                <option value="handdrawn">Hand-drawn 2D explainer</option>
-              </select>
+              <label>Tiêu đề YouTube SEO (Tự động điền hoặc tự nhập):</label>
+              <input type="text" id="vgTitle" placeholder="Vd: Why 99% of People Fail at Discipline (And How to Fix It)" />
             </div>
             <div class="form-group">
-              <label>Khung hình:</label>
-              <select id="vgAspectRatio" class="form-select">
-                <option value="16:9">Ngang 16:9</option>
-                <option value="9:16">Dọc 9:16</option>
-              </select>
+              <label>Kịch bản lời bình (Narration Script — ngôn ngữ theo thị trường đã chọn):</label>
+              <textarea id="vgScriptInput" rows="6" placeholder="Nhập kịch bản tiếng Anh (US), tiếng Nhật (JP) hoặc tiếng Việt... Hoặc bấm nút AI Viết Kịch Bản / Tạo Video Trọn Gói Từ Muse.ai ở trên!"></textarea>
             </div>
-            <div class="form-group">
-              <label>Tiêu đề:</label>
-              <input type="text" id="vgTitle" placeholder="Vd: Rùa và Thỏ" />
+            <div class="grid-2-col" style="margin-bottom: 14px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>Bài học rút ra / Key Takeaway / 今日のまとめ (scene cuối):</label>
+                <input type="text" id="vgLessonText" placeholder="Vd: Small daily systems beat temporary motivation." />
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>Chế độ dựng hình từng Scene (Media & Render Mode):</label>
+                <select id="vgMediaMode" class="form-select">
+                  <option value="muse">🎬 Muse.ai Video AI (Tạo video AI chuyển động cho từng Scene + Ghép TTS & Phụ đề)</option>
+                  <option value="direct">⚡ Render Nhanh (Giọng đọc TTS + Phụ đề Karaoke + Ken Burns)</option>
+                  <option value="playwright">🎥 Gemini Ultra Veo (Qua Chrome Debug Port 9222)</option>
+                </select>
+              </div>
             </div>
-            <div class="form-group">
-              <label>Kịch bản:</label>
-              <textarea id="vgScriptInput" rows="6" placeholder="Nhập kịch bản..."></textarea>
-            </div>
-            <div class="form-group">
-              <label>Bài học rút ra (tuỳ chọn, thêm 1 scene cuối video):</label>
-              <input type="text" id="vgLessonText" placeholder="Vd: Kiên trì sẽ chiến thắng" />
-            </div>
-            <button class="btn btn-primary btn-block" id="vgPlanBtn">🎬 Chia Scene</button>
+
+            <button class="btn btn-primary btn-block" id="vgPlanBtn">🎬 Bước 2: Chia Scene & Lập Storyboard (Muse.ai / AgentGW)</button>
 
             <div id="vgProjectView" class="vf-project-view" hidden>
-              <div id="vgSceneGrid" class="vf-scene-grid"></div>
-              <div class="button-row">
-                <button class="btn btn-primary" id="vgGenerateBtn" hidden>🎨 Sinh Media + Render</button>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin: 14px 0 8px;">
+                <strong id="vgProjectMetaLabel" style="font-size: 13px; color: #38bdf8;">Danh sách Scene đã lập kế hoạch</strong>
               </div>
-              <video id="vgFinalVideo" controls hidden></video>
-              <div class="form-group" id="vgPublishBox" hidden>
-                <input type="text" id="vgCaption" placeholder="Caption TikTok (tuỳ chọn)" />
-                <button class="btn btn-secondary" id="vgPublishBtn">📤 Đăng TikTok</button>
+              <div id="vgSceneGrid" class="vf-scene-grid"></div>
+              <div class="button-row" style="margin-top: 12px;">
+                <button class="btn btn-primary" id="vgGenerateBtn" hidden>🎨 Bước 3: Sinh Giọng Đọc Bản Địa + Render Video MP4</button>
+              </div>
+              <video id="vgFinalVideo" controls hidden style="margin-top: 14px; max-height: 440px; width: 100%; border-radius: 10px;"></video>
+              <div class="form-group" id="vgPublishBox" hidden style="margin-top: 14px; background: rgba(0,0,0,0.25); padding: 14px; border-radius: 10px; border: 1px solid var(--border-color);">
+                <label style="color: #38bdf8; font-weight: 600;">🚀 Xuất bản Video Quốc Tế (YouTube Data API v3 / TikTok)</label>
+                <input type="text" id="vgCaption" placeholder="Mô tả / Caption YouTube & TikTok (tự động lấy từ SEO Description)" style="margin: 8px 0;" />
+                <input type="text" id="vgTags" placeholder="Tags YouTube cách nhau bởi dấu phẩy (Vd: selfimprovement, mindset, psychology)" style="margin-bottom: 10px;" />
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" id="vgPublishYoutubeBtn">📺 Đăng YouTube (Kênh US / JP / VN)</button>
+                  <button class="btn btn-secondary" id="vgPublishBtn">📤 Đăng TikTok</button>
+                </div>
               </div>
             </div>
           </div>

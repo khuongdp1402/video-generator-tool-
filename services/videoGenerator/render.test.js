@@ -36,3 +36,23 @@ test('does not append a lesson scene when lessonText is empty', () => {
   const data = buildVideoDataJson(project);
   assert.equal(data.scenes.length, 1);
 });
+
+test('uses localized lesson title and CJK duration estimation for Japan (JP) market', () => {
+  const project = {
+    kind: 'story',
+    aspectRatio: '16:9',
+    market: 'JP',
+    title: '複利の力',
+    lessonText: '毎日1%の改善を続けることが最大の武器になる。',
+    meta: { theme: 'dark-cyan', voice: 'ja-JP-KeitaNeural', voiceRate: '-2%', bgMusic: '' },
+    scenes: [
+      { id: 1, type: 'media', text: '小さな習慣が人生を変える。', audioFile: 'audio/scene_1.mp3', durationInFrames: 180 },
+    ],
+  };
+  const data = buildVideoDataJson(project);
+  assert.equal(data.meta.market, 'JP');
+  assert.equal(data.meta.language, 'ja');
+  assert.equal(data.scenes[1].title, '今日の教訓');
+  assert.ok(data.scenes[1].durationInFrames >= 120);
+});
+

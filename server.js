@@ -20,6 +20,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/storage/raw', express.static(path.join(__dirname, 'storage', 'raw')));
 app.use('/storage/remake', express.static(path.join(__dirname, 'storage', 'remake')));
 app.use('/storage/video-gen', express.static(path.join(__dirname, 'storage', 'video-gen')));
+app.use('/output', express.static(path.join(__dirname, 'my-video-engine', 'output')));
 app.use('/media', express.static(path.join(__dirname, 'my-video-engine', 'public', 'media')));
 
 // storage/ is gitignored (per-machine runtime state, see Task 1 of the
@@ -50,10 +51,19 @@ function saveDb(data) {
 
 const minioService = new MinioService();
 
+const { execFileSync, spawn } = require('child_process');
 const videoGenStore = require('./services/videoGenerator/store');
-const { getDimensions } = require('./services/videoGenerator/stylePresets');
+const { getDimensions, MARKET_PRESETS, getMarketPreset } = require('./services/videoGenerator/stylePresets');
 const { connectToGeminiPage } = require('./services/videoGenerator/geminiChat');
-const { planScenes } = require('./services/videoGenerator/director');
+const {
+  DEFAULT_MUSE_URL,
+  connectToMusePage,
+  planScenesWithMuse,
+  generateSceneMediaWithMuse,
+  generateFullVideoWithMuse,
+} = require('./services/videoGenerator/museChat');
+const { planScenes, planScenesWithAgentGW, generateMarketScript } = require('./services/videoGenerator/director');
+const { checkKeyUsage, getAgentGwConfig, AGENTGW_MODELS } = require('./services/videoGenerator/agentgwClient');
 const { generateSceneMedia } = require('./services/videoGenerator/mediaGen');
 const { generateSceneAudio } = require('./services/videoGenerator/ttsGenerator');
 const { renderProject } = require('./services/videoGenerator/render');
@@ -404,10 +414,238 @@ app.post('/api/targets', (req, res) => {
   }
 });
 
-// 23. Tạo project mới + chia scene (Gemini Ultra chat, không tốn phí API)
+// 22a. Kiểm tra trạng thái kết nối AgentGW API + danh sách thị trường US/JP/VI
+app.get('/api/agentgw/status', async (req, res) => {
+  try {
+    const cfg = getAgentGwConfig();
+    const usage = await checkKeyUsage();
+    res.json({
+      success: true,
+      hasKey: Boolean(cfg.apiKey),
+      baseUrl: cfg.baseUrl,
+      defaultModel: cfg.model,
+      usage,
+      models: AGENTGW_MODELS,
+      markets: MARKET_PRESETS,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 22b. Dùng AgentGW viết mới hoặc bản địa hoá kịch bản sang thị trường Mỹ (US) / Nhật Bản (JP) / Việt Nam (VI)
+app.post('/api/agentgw/script', async (req, res) => {
+  try {
+    const { topic, kind = 'story', market = 'US', model } = req.body;
+    if (!topic || !topic.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập chủ đề hoặc kịch bản gốc cần bản địa hoá' });
+    }
+    const result = await generateMarketScript(topic.trim(), kind, market, { model });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('Lỗi tạo kịch bản qua AgentGW:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 22c. Kiểm tra trạng thái kết nối Chrome CDP 9222 cho Muse.ai
+app.get('/api/muse/status', async (req, res) => {
+  try {
+    const http = require('http');
+    const cdpAlive = await new Promise((resolve) => {
+      const request = http.get('http://127.0.0.1:9222/json/version', (resp) => {
+        resolve(resp.statusCode === 200);
+      });
+      request.on('error', () => resolve(false));
+      request.setTimeout(1500, () => {
+        request.destroy();
+        resolve(false);
+      });
+    });
+    res.json({
+      success: true,
+      cdpAlive,
+      defaultMuseUrl: DEFAULT_MUSE_URL,
+    });
+  } catch (err) {
+    res.json({ success: true, cdpAlive: false, defaultMuseUrl: DEFAULT_MUSE_URL });
+  }
+});
+
+// 22d. Mở trình duyệt Google Chrome với --remote-debugging-port=9222 trỏ tới Muse.ai
+app.post('/api/muse/open-browser', async (req, res) => {
+  try {
+    const { museUrl = DEFAULT_MUSE_URL } = req.body || {};
+    const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    if (!fs.existsSync(chromePath)) {
+      return res.status(404).json({
+        error: 'Không tìm thấy Google Chrome tại /Applications/Google Chrome.app',
+      });
+    }
+    const profileDir = path.join(__dirname, 'storage', 'chrome-muse-profile');
+    if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+    const child = spawn(
+      chromePath,
+      [
+        '--remote-debugging-port=9222',
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        museUrl,
+      ],
+      { detached: true, stdio: 'ignore' }
+    );
+    child.unref();
+
+    res.json({
+      success: true,
+      message: `Đã mở Google Chrome (CDP Port 9222) tới ${museUrl}!`,
+      profileDir,
+      museUrl,
+    });
+  } catch (err) {
+    console.error('Lỗi mở Chrome Muse:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 22e. Tạo kịch bản + Video AI trọn gói trực tiếp từ Muse.ai (1-Click Full Video)
+app.post('/api/video-gen/muse-full', withGenerationLock(async (req, res) => {
+  let projectId = null;
+  try {
+    const {
+      topic,
+      rawScript,
+      kind = 'story',
+      aspectRatio = '16:9',
+      market = 'US',
+      title,
+      lessonText,
+      youtubeMeta,
+      museUrl = DEFAULT_MUSE_URL,
+      useAgentGwForMeta = true,
+      model,
+    } = req.body || {};
+
+    const inputContent = (rawScript && rawScript.trim()) || (topic && topic.trim());
+    if (!inputContent) {
+      return res.status(400).json({
+        error: 'Vui lòng nhập Chủ đề (Topic) hoặc Kịch bản để Muse.ai tạo video',
+      });
+    }
+
+    try {
+      getDimensions(aspectRatio);
+    } catch (dimErr) {
+      return res.status(400).json({ error: dimErr.message });
+    }
+
+    // Nếu người dùng mới chỉ nhập chủ đề ngắn và có AgentGW, tự động sinh thêm metadata chuẩn SEO US/JP + kịch bản hoàn chỉnh
+    let finalTitle = title || '';
+    let finalScript = rawScript && rawScript.trim() ? rawScript.trim() : inputContent;
+    let finalLesson = lessonText || '';
+    let finalYoutubeMeta = youtubeMeta || null;
+
+    const cfg = getAgentGwConfig();
+    if (useAgentGwForMeta && cfg.apiKey && (!rawScript || !rawScript.trim() || !finalTitle)) {
+      try {
+        const enriched = await generateMarketScript(inputContent, kind, market, { model });
+        if (!finalTitle && enriched.title) finalTitle = enriched.title;
+        if ((!rawScript || !rawScript.trim()) && enriched.rawScript) finalScript = enriched.rawScript;
+        if (!finalLesson && enriched.lessonText) finalLesson = enriched.lessonText;
+        if (!finalYoutubeMeta) {
+          finalYoutubeMeta = {
+            description: enriched.youtubeDescription || '',
+            tags: enriched.youtubeTags || [],
+          };
+        }
+      } catch (metaErr) {
+        console.warn('[Muse Full] Bỏ qua bước làm giàu SEO qua AgentGW:', metaErr.message);
+      }
+    }
+
+    const project = videoGenStore.createProject({
+      kind,
+      aspectRatio,
+      rawScript: finalScript,
+      lessonText: finalLesson,
+      market,
+      title: finalTitle || `Muse AI Video (${market})`,
+      youtubeMeta: finalYoutubeMeta,
+    });
+    projectId = project.id;
+
+    videoGenStore.updateProject(project.id, {
+      status: 'generating_media',
+      scenes: [
+        {
+          id: 1,
+          text: finalScript,
+          videoPrompt: `Full AI Video on Muse.ai (${market}, ${aspectRatio}): ${finalTitle || inputContent}`,
+          mediaStatus: 'pending',
+          mediaFile: null,
+        },
+      ],
+    });
+
+    const projectDir = videoGenStore.getProjectDir(project.id);
+    const outputPath = path.join(projectDir, 'output.mp4');
+
+    const { page } = await connectToMusePage({ museUrl });
+    await generateFullVideoWithMuse(
+      page,
+      {
+        topic: finalTitle || inputContent,
+        rawScript: finalScript,
+        kind,
+        market,
+        aspectRatio,
+      },
+      outputPath
+    );
+
+    const updated = videoGenStore.updateProject(project.id, {
+      status: 'done',
+      outputPath,
+      scenes: [
+        {
+          id: 1,
+          text: finalScript,
+          videoPrompt: `Generated directly via Muse.ai (${market}, ${aspectRatio})`,
+          mediaStatus: 'video',
+          mediaFile: outputPath,
+        },
+      ],
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('Lỗi tạo video trọn gói với Muse.ai:', err);
+    if (projectId) {
+      videoGenStore.updateProject(projectId, { status: 'failed' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+}));
+
+// 23. Tạo project mới + chia scene (hỗ trợ Muse.ai, AgentGW API cho US/JP/VI, hoặc Gemini Ultra Playwright)
 app.post('/api/video-gen/plan', withGenerationLock(async (req, res) => {
   try {
-    const { kind, aspectRatio, rawScript, lessonText, title } = req.body;
+    const {
+      kind = 'story',
+      aspectRatio = '16:9',
+      rawScript,
+      lessonText,
+      title,
+      market = 'US',
+      voice,
+      voiceRate,
+      engine = 'agentgw',
+      model,
+      youtubeMeta,
+      museUrl = DEFAULT_MUSE_URL,
+    } = req.body;
     if (!rawScript || !rawScript.trim()) {
       return res.status(400).json({ error: 'Vui lòng nhập kịch bản' });
     }
@@ -416,13 +654,42 @@ app.post('/api/video-gen/plan', withGenerationLock(async (req, res) => {
     } catch (dimErr) {
       return res.status(400).json({ error: dimErr.message });
     }
-    const project = videoGenStore.createProject({ kind, aspectRatio, rawScript, lessonText: lessonText || '' });
-    if (title) videoGenStore.updateProject(project.id, { title });
 
-    const { page } = await connectToGeminiPage();
-    const scenes = await planScenes(page, rawScript, kind);
+    const project = videoGenStore.createProject({
+      kind,
+      aspectRatio,
+      rawScript,
+      lessonText: lessonText || '',
+      market,
+      voice,
+      voiceRate,
+      title: title || '',
+      youtubeMeta,
+    });
+
+    let scenes;
+    let extraUpdates = {};
+    const cfg = getAgentGwConfig();
+    if (engine === 'muse') {
+      const { page } = await connectToMusePage({ museUrl });
+      const planRes = await planScenesWithMuse(page, rawScript, kind, market);
+      scenes = Array.isArray(planRes) ? planRes : planRes.scenes;
+      if (!title && planRes.title) extraUpdates.title = planRes.title;
+      if (!lessonText && planRes.lessonText) extraUpdates.lessonText = planRes.lessonText;
+      if (!youtubeMeta && planRes.youtubeMeta) extraUpdates.youtubeMeta = planRes.youtubeMeta;
+    } else if (engine !== 'playwright' && cfg.apiKey) {
+      const planRes = await planScenesWithAgentGW(rawScript, kind, market, { model });
+      scenes = Array.isArray(planRes) ? planRes : planRes.scenes;
+      if (!title && planRes.title) extraUpdates.title = planRes.title;
+      if (!lessonText && planRes.lessonText) extraUpdates.lessonText = planRes.lessonText;
+      if (!youtubeMeta && planRes.youtubeMeta) extraUpdates.youtubeMeta = planRes.youtubeMeta;
+    } else {
+      const { page } = await connectToGeminiPage();
+      scenes = await planScenes(page, rawScript, kind, market);
+    }
 
     const updated = videoGenStore.updateProject(project.id, {
+      ...extraUpdates,
       status: 'planned',
       scenes,
     });
@@ -433,42 +700,64 @@ app.post('/api/video-gen/plan', withGenerationLock(async (req, res) => {
   }
 }));
 
-// 24. Sinh media + audio cho toàn bộ scene rồi render
+// 24. Sinh media + audio cho toàn bộ scene rồi render (hỗ trợ Muse.ai, Direct TTS+Render hoặc Gemini Ultra Veo)
 app.post('/api/video-gen/:id/generate', withGenerationLock(async (req, res) => {
   try {
     const { id } = req.params;
+    const { mediaMode = 'direct', voice, voiceRate, museUrl = DEFAULT_MUSE_URL } = req.body || {};
     const project = videoGenStore.getProject(id);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
 
-    videoGenStore.updateProject(id, { status: 'generating_media' });
-    const { page } = await connectToGeminiPage();
-
-    for (const scene of project.scenes) {
-      if (scene.mediaStatus === 'video') continue; // already generated (retry-safe)
-      try {
-        const result = await generateSceneMedia(page, scene, MEDIA_DIR);
-        scene.mediaStatus = result.mediaStatus;
-        scene.mediaFile = result.mediaFile;
-        scene.error = null;
-      } catch (sceneErr) {
-        scene.mediaStatus = 'pending';
-        scene.error = sceneErr.message;
-      }
-      videoGenStore.updateProject(id, { scenes: project.scenes });
+    if (voice || voiceRate) {
+      project.meta = {
+        ...project.meta,
+        ...(voice ? { voice } : {}),
+        ...(voiceRate ? { voiceRate } : {}),
+      };
+      videoGenStore.updateProject(id, { meta: project.meta });
     }
 
-    const anyFailed = project.scenes.some((s) => s.mediaStatus !== 'video');
-    if (anyFailed) {
-      const updated = videoGenStore.updateProject(id, { status: 'media_failed' });
-      return res.json({ success: true, data: updated });
+    if (mediaMode === 'muse' || mediaMode === 'playwright') {
+      videoGenStore.updateProject(id, { status: 'generating_media' });
+      const { page } =
+        mediaMode === 'muse'
+          ? await connectToMusePage({ museUrl })
+          : await connectToGeminiPage();
+
+      for (const scene of project.scenes) {
+        if (scene.mediaStatus === 'video') continue; // already generated (retry-safe)
+        try {
+          const result =
+            mediaMode === 'muse'
+              ? await generateSceneMediaWithMuse(page, scene, MEDIA_DIR)
+              : await generateSceneMedia(page, scene, MEDIA_DIR);
+          scene.mediaStatus = result.mediaStatus;
+          scene.mediaFile = result.mediaFile;
+          scene.error = null;
+        } catch (sceneErr) {
+          scene.mediaStatus = 'pending';
+          scene.error = sceneErr.message;
+        }
+        videoGenStore.updateProject(id, { scenes: project.scenes });
+      }
+
+      const anyFailed = project.scenes.some((s) => s.mediaStatus !== 'video');
+      if (anyFailed) {
+        const updated = videoGenStore.updateProject(id, { status: 'media_failed' });
+        return res.json({ success: true, data: updated });
+      }
     }
 
     videoGenStore.updateProject(id, { status: 'generating_audio' });
+    const marketPreset = getMarketPreset(project.market || project.meta?.market || 'US');
+    const selectedVoice = project.meta?.voice || marketPreset.defaultVoice;
+    const selectedRate = project.meta?.voiceRate || marketPreset.voiceRate;
+
     for (let i = 0; i < project.scenes.length; i++) {
       const audioResult = await generateSceneAudio(
         project.scenes[i],
-        project.meta.voice,
-        project.meta.voiceRate,
+        selectedVoice,
+        selectedRate,
         AUDIO_DIR
       );
       project.scenes[i] = audioResult;
@@ -487,17 +776,24 @@ app.post('/api/video-gen/:id/generate', withGenerationLock(async (req, res) => {
   }
 }));
 
-// 25. Sinh lại media cho 1 scene bị lỗi
+// 25. Sinh lại media cho 1 scene bị lỗi (hỗ trợ cả Muse.ai và Gemini Ultra)
 app.post('/api/video-gen/:id/retry-scene/:sceneId', withGenerationLock(async (req, res) => {
   try {
     const { id, sceneId } = req.params;
+    const { mediaMode = 'muse', museUrl = DEFAULT_MUSE_URL } = req.body || {};
     const project = videoGenStore.getProject(id);
     if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
     const scene = project.scenes.find((s) => String(s.id) === sceneId);
     if (!scene) return res.status(404).json({ error: 'Không tìm thấy scene' });
 
-    const { page } = await connectToGeminiPage();
-    const result = await generateSceneMedia(page, scene, MEDIA_DIR);
+    const { page } =
+      mediaMode === 'muse'
+        ? await connectToMusePage({ museUrl })
+        : await connectToGeminiPage();
+    const result =
+      mediaMode === 'muse'
+        ? await generateSceneMediaWithMuse(page, scene, MEDIA_DIR)
+        : await generateSceneMedia(page, scene, MEDIA_DIR);
     scene.mediaStatus = result.mediaStatus;
     scene.mediaFile = result.mediaFile;
     scene.error = null;
@@ -537,7 +833,10 @@ app.post('/api/video-gen/:id/publish/tiktok', async (req, res) => {
     const uploadResult = await TikTokUploader.uploadVideo(project.outputPath, finalCaption);
 
     const updated = videoGenStore.updateProject(id, {
-      publishing: { tiktok: { posted: true, postedAt: new Date().toISOString(), url: uploadResult.url || null } },
+      publishing: {
+        ...(project.publishing || {}),
+        tiktok: { posted: true, postedAt: new Date().toISOString(), url: uploadResult.url || null },
+      },
     });
     res.json({ success: true, data: updated });
   } catch (err) {
@@ -546,6 +845,74 @@ app.post('/api/video-gen/:id/publish/tiktok', async (req, res) => {
   }
 });
 
+// 29. Đăng video đã render lên YouTube (hỗ trợ kênh US en-US / JP ja-JP / VI vi-VN)
+app.post('/api/video-gen/:id/publish/youtube', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, tags, market } = req.body || {};
+    const project = videoGenStore.getProject(id);
+    if (!project) return res.status(404).json({ error: 'Không tìm thấy project' });
+    if (!project.outputPath || !fs.existsSync(project.outputPath)) {
+      return res.status(400).json({ error: 'Video chưa render xong' });
+    }
+
+    const targetMarket = (market || project.market || 'US').toUpperCase();
+    const finalTitle = (title && title.trim()) || project.title || `AI Video (${targetMarket})`;
+    const finalDesc =
+      (description && description.trim()) ||
+      project.youtubeMeta?.description ||
+      project.lessonText ||
+      '';
+    const finalTags = Array.isArray(tags) && tags.length > 0
+      ? tags
+      : (project.youtubeMeta?.tags || []);
+
+    const engineDir = path.join(__dirname, 'my-video-engine');
+    const venvPy = path.join(engineDir, '.venv', 'bin', 'python3');
+    const pyBin = fs.existsSync(venvPy) ? venvPy : 'python3';
+
+    const args = [
+      'main.py',
+      'upload',
+      'youtube',
+      project.outputPath,
+      '--title',
+      finalTitle,
+      '--description',
+      finalDesc,
+      '--market',
+      targetMarket,
+    ];
+    if (finalTags.length > 0) {
+      args.push('--tags', ...finalTags);
+    }
+
+    const stdout = execFileSync(pyBin, args, {
+      cwd: engineDir,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+    const videoUrl = stdout.trim().split('\n').pop() || null;
+
+    const updated = videoGenStore.updateProject(id, {
+      publishing: {
+        ...(project.publishing || {}),
+        youtube: {
+          posted: true,
+          market: targetMarket,
+          postedAt: new Date().toISOString(),
+          url: videoUrl,
+        },
+      },
+    });
+    res.json({ success: true, data: updated, url: videoUrl });
+  } catch (err) {
+    console.error('Lỗi đăng YouTube:', err);
+    const stderr = err.stderr ? err.stderr.toString() : err.message;
+    res.status(500).json({ error: stderr });
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Douyin Reup Pipeline Server đang chạy tại: http://localhost:${PORT}`);
+  console.log(`🚀 Douyin Reup & Global YouTube AI Video Server đang chạy tại: http://localhost:${PORT}`);
 });

@@ -12,8 +12,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
-my-video-engine/client_secrets.json
-my-video-engine/token.json
+my-video-engine/.env
+my-video-engine/client_secrets*.json
+my-video-engine/token*.json
 
 # Embedded Python runtime (edge_tts + mutagen for TTS)
 python/

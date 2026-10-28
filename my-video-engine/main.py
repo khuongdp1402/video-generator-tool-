@@ -18,15 +18,22 @@ logger = get_logger(__name__)
 def cmd_script(args):
     from ai_generator import generate_scenario
 
-    scenario = generate_scenario(args.topic)
+    market_code = (args.market or "US").strip().upper()
+    scenario = generate_scenario(args.topic, market=market_code)
     cfg = load_config()
+    m_cfg = cfg.market(market_code)
     data_file = cfg.path("data_file")
 
     data = {
         "meta": {
-            "title": args.topic,
-            "voice": cfg.get("tts", "voice"),
-            "voiceRate": cfg.get("tts", "rate"),
+            "title": scenario.get("youtubeTitle") or args.topic,
+            "youtubeDescription": scenario.get("youtubeDescription", ""),
+            "youtubeTags": scenario.get("youtubeTags", []),
+            "market": market_code,
+            "language": m_cfg.get("language", "en"),
+            "locale": m_cfg.get("locale", "en-US"),
+            "voice": m_cfg.get("voice") or cfg.get("tts", "voice"),
+            "voiceRate": m_cfg.get("rate") or cfg.get("tts", "rate"),
         },
         "scenes": [
             {
@@ -43,7 +50,7 @@ def cmd_script(args):
     }
     with open(data_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.info("Wrote %d scenes to %s", len(data["scenes"]), data_file)
+    logger.info("Wrote %d scenes (market=%s) to %s", len(data["scenes"]), market_code, data_file)
 
 
 def cmd_voiceover(args):
@@ -63,7 +70,13 @@ def cmd_upload(args):
     if args.platform == "youtube":
         from uploader import upload_youtube
 
-        url = upload_youtube(args.video, args.title, args.description or "", tags=args.tags)
+        url = upload_youtube(
+            args.video,
+            args.title,
+            args.description or "",
+            tags=args.tags,
+            market=args.market,
+        )
         print(url)
     elif args.platform == "tiktok":
         from uploader import upload_tiktok
@@ -78,6 +91,7 @@ def main():
 
     p_script = sub.add_parser("script", help="Generate a scored scenario from a topic (Module 2)")
     p_script.add_argument("topic")
+    p_script.add_argument("--market", default="US", choices=["US", "JP", "VI"], help="Target market (US, JP, VI)")
     p_script.set_defaults(func=cmd_script)
 
     p_voice = sub.add_parser("voiceover", help="TTS + Whisper alignment for all scenes (Module 3)")
@@ -93,6 +107,7 @@ def main():
     p_upload.add_argument("--title", required=True)
     p_upload.add_argument("--description", default="")
     p_upload.add_argument("--tags", nargs="*", default=[])
+    p_upload.add_argument("--market", default="US", choices=["US", "JP", "VI"], help="Target market (US, JP, VI)")
     p_upload.set_defaults(func=cmd_upload)
 
     args = parser.parse_args()

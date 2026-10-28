@@ -1,10 +1,9 @@
 // services/videoGenerator/geminiChat.js
-const { chromium } = require('playwright');
-
 const DEFAULT_CDP_URL = 'http://localhost:9222';
 const GEMINI_URL = 'https://gemini.google.com/app';
 
 async function connectToGeminiPage(cdpUrl = DEFAULT_CDP_URL) {
+  const { chromium } = require('playwright');
   const browser = await chromium.connectOverCDP(cdpUrl);
   const context = browser.contexts()[0];
   if (!context) {

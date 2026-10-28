@@ -25,9 +25,28 @@ logger = get_logger(__name__)
 YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 
-def _youtube_client(cfg):
-    token_file = Path(cfg.env["youtube_token_file"])
+def _youtube_client(cfg, market: str = "US"):
+    market_code = (market or "US").strip().upper()
+    m_cfg = cfg.market(market_code)
+    if market_code == "US":
+        token_rel = cfg.env.get("youtube_token_file_us") or m_cfg.get("youtube_token_file", "token_us.json")
+    elif market_code == "JP":
+        token_rel = cfg.env.get("youtube_token_file_jp") or m_cfg.get("youtube_token_file", "token_jp.json")
+    else:
+        token_rel = cfg.env.get("youtube_token_file") or m_cfg.get("youtube_token_file", "token.json")
+
+    token_file = Path(token_rel)
+    if not token_file.is_absolute():
+        token_file = cfg.project_root / token_file
+
+    # Fallback to default token.json if market-specific token file doesn't exist yet
+    default_token = cfg.project_root / cfg.env["youtube_token_file"]
+    if not token_file.exists() and default_token.exists():
+        token_file = default_token
+
     client_secrets_file = Path(cfg.env["youtube_client_secrets_file"])
+    if not client_secrets_file.is_absolute():
+        client_secrets_file = cfg.project_root / client_secrets_file
 
     creds = None
     if token_file.exists():
@@ -50,25 +69,46 @@ def _youtube_client(cfg):
     return build("youtube", "v3", credentials=creds)
 
 
-def upload_youtube(video_path: str, title: str, description: str, tags: list[str] | None = None) -> str:
-    """Uploads video_path to YouTube. Returns the resulting video URL."""
+def upload_youtube(
+    video_path: str,
+    title: str,
+    description: str,
+    tags: list[str] | None = None,
+    market: str = "US",
+) -> str:
+    """Uploads video_path to YouTube with market-specific locale metadata. Returns the resulting video URL."""
     cfg = load_config()
-    youtube = _youtube_client(cfg)
+    market_code = (market or "US").strip().upper()
+    m_cfg = cfg.market(market_code)
+    youtube = _youtube_client(cfg, market=market_code)
+
+    locale = m_cfg.get("locale", "en-US")
+    lang = m_cfg.get("language", "en")
+    category_id = str(m_cfg.get("youtube_category_id") or cfg.get("youtube", "category_id", default="27"))
 
     body = {
         "snippet": {
-            "title": title,
+            "title": title[:100],
             "description": description,
             "tags": tags or [],
-            "categoryId": cfg.get("youtube", "category_id", default="22"),
+            "categoryId": category_id,
+            "defaultLanguage": lang,
+            "defaultAudioLanguage": locale,
         },
         "status": {
             "privacyStatus": cfg.get("youtube", "privacy_status", default="private"),
+            "selfDeclaredMadeForKids": False,
         },
     }
     media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
 
-    logger.info("Uploading %s to YouTube (privacy=%s)...", video_path, body["status"]["privacyStatus"])
+    logger.info(
+        "Uploading %s to YouTube (market=%s, locale=%s, privacy=%s)...",
+        video_path,
+        market_code,
+        locale,
+        body["status"]["privacyStatus"],
+    )
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
     response = None
@@ -78,8 +118,8 @@ def upload_youtube(video_path: str, title: str, description: str, tags: list[str
             logger.info("Upload progress: %d%%", int(status.progress() * 100))
 
     video_id = response["id"]
-    url = f"https://youtube.com/shorts/{video_id}"
-    logger.info("YouTube upload complete: %s", url)
+    url = f"https://youtu.be/{video_id}"
+    logger.info("YouTube upload complete (%s): %s", market_code, url)
     return url
 
 

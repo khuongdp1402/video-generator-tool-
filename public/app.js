@@ -37,6 +37,9 @@ function initTabs() {
       if (target === 'tab-autopilot') {
         loadAutopilotData();
       }
+      if (target === 'tab-video-gen') {
+        vgLoadAgentGwStatus();
+      }
     });
   });
 }
@@ -59,9 +62,21 @@ function setupEventListeners() {
   document.getElementById('btn-refresh-logs')?.addEventListener('click', loadAutopilotData);
 
   // Video Generator listeners
+  document.getElementById('vgMarket')?.addEventListener('change', vgUpdateVoiceOptions);
+  document.getElementById('vgCheckQuotaBtn')?.addEventListener('click', () => {
+    vgLoadAgentGwStatus();
+    vgLoadMuseStatus();
+  });
+  document.getElementById('vgOpenMuseBrowserBtn')?.addEventListener('click', vgOpenMuseBrowser);
+  document.getElementById('vgMuseFullBtn')?.addEventListener('click', vgMuseFullGenerate);
+  document.getElementById('vgWriteScriptBtn')?.addEventListener('click', vgWriteMarketScript);
   document.getElementById('vgPlanBtn')?.addEventListener('click', vgPlanScenes);
   document.getElementById('vgGenerateBtn')?.addEventListener('click', vgGenerateAndRender);
   document.getElementById('vgPublishBtn')?.addEventListener('click', vgPublishToTikTok);
+  document.getElementById('vgPublishYoutubeBtn')?.addEventListener('click', vgPublishToYouTube);
+
+  vgLoadAgentGwStatus();
+  vgLoadMuseStatus();
 
   document.getElementById('select-remake-video').addEventListener('change', (e) => {
     const video = videoLibrary.find(v => v.id === e.target.value);
@@ -656,18 +671,242 @@ function escapeHtml(str) {
   }[m]));
 }
 
-// 9. VIDEO GENERATOR MODULE FUNCTIONS
+// 9. VIDEO GENERATOR MODULE FUNCTIONS (AgentGW + US / JP / VI YouTube)
 let vgCurrentProjectId = null;
+let vgMarketsCache = {
+  US: {
+    defaultVoice: 'en-US-AndrewMultilingualNeural',
+    voices: [
+      { id: 'en-US-AndrewMultilingualNeural', label: 'Andrew Multilingual (Nam - US Storytelling)' },
+      { id: 'en-US-BrianNeural', label: 'Brian (Nam - US Documentary)' },
+      { id: 'en-US-AvaMultilingualNeural', label: 'Ava Multilingual (Nữ - US Warm & Clear)' },
+    ],
+  },
+  JP: {
+    defaultVoice: 'ja-JP-KeitaNeural',
+    voices: [
+      { id: 'ja-JP-KeitaNeural', label: 'Keita (Nam - Nhật Bản 解説・ナレーション)' },
+      { id: 'ja-JP-NanamiNeural', label: 'Nanami (Nữ - Nhật Bản Tự nhiên / Viral)' },
+    ],
+  },
+  VI: {
+    defaultVoice: 'vi-VN-NamMinhNeural',
+    voices: [
+      { id: 'vi-VN-NamMinhNeural', label: 'Nam Minh (Nam - Tiếng Việt)' },
+      { id: 'vi-VN-HoaiMyNeural', label: 'Hoài My (Nữ - Tiếng Việt)' },
+    ],
+  },
+};
+
+async function vgLoadMuseStatus() {
+  const badge = document.getElementById('vgMuseBadge');
+  if (!badge) return;
+  try {
+    const res = await fetch('/api/muse/status');
+    const json = await res.json();
+    if (json.cdpAlive) {
+      badge.innerText = '✅ Muse Chrome (Port 9222): Đã kết nối';
+      badge.style.borderColor = '#4ade80';
+      badge.style.color = '#4ade80';
+    } else {
+      badge.innerText = '⚠️ Muse Chrome (9222): Chưa mở';
+      badge.style.borderColor = '#f59e0b';
+      badge.style.color = '#fbbf24';
+    }
+  } catch (err) {
+    badge.innerText = '⚠️ Muse Chrome: Offline';
+  }
+}
+
+async function vgOpenMuseBrowser() {
+  const btn = document.getElementById('vgOpenMuseBrowserBtn');
+  const museUrl = document.getElementById('vgMuseUrl')?.value?.trim() || 'https://muse.ai';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '⏳ Đang mở Chrome (Port 9222)...';
+  }
+  try {
+    const res = await fetch('/api/muse/open-browser', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ museUrl }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert('Lỗi: ' + json.error);
+    alert(json.message);
+    setTimeout(vgLoadMuseStatus, 2000);
+  } catch (err) {
+    alert('Lỗi mở trình duyệt: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '🌐 Mở Chrome Kết Nối Muse.ai (Port 9222)';
+    }
+  }
+}
+
+async function vgMuseFullGenerate() {
+  const topic = document.getElementById('vgTopicInput')?.value?.trim() || '';
+  const rawScript = document.getElementById('vgScriptInput')?.value?.trim() || '';
+  if (!topic && !rawScript) {
+    return alert('Vui lòng nhập Chủ đề (ở Bước 1) hoặc Kịch bản để Muse.ai tạo video trọn gói!');
+  }
+
+  const market = document.getElementById('vgMarket')?.value || 'US';
+  const kind = document.getElementById('vgKind')?.value || 'story';
+  const aspectRatio = document.getElementById('vgAspectRatio')?.value || '16:9';
+  const title = document.getElementById('vgTitle')?.value?.trim() || '';
+  const lessonText = document.getElementById('vgLessonText')?.value?.trim() || '';
+  const museUrl = document.getElementById('vgMuseUrl')?.value?.trim() || 'https://muse.ai';
+  const model = document.getElementById('vgModel')?.value || 'agentgw-opus-4-8';
+  const btn = document.getElementById('vgMuseFullBtn');
+
+  btn.disabled = true;
+  btn.innerText = `⏳ Đang gửi yêu cầu lên Muse.ai & chờ render video (${market} - ${aspectRatio})...`;
+
+  try {
+    const tagsRaw = document.getElementById('vgTags')?.value || '';
+    const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+    const description = document.getElementById('vgCaption')?.value?.trim() || '';
+
+    const res = await fetch('/api/video-gen/muse-full', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic,
+        rawScript,
+        kind,
+        aspectRatio,
+        market,
+        title,
+        lessonText,
+        museUrl,
+        model,
+        youtubeMeta: description || tags.length ? { description, tags } : undefined,
+      }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert('Lỗi Muse.ai: ' + json.error);
+
+    vgCurrentProjectId = json.data.id;
+    if (json.data.title && document.getElementById('vgTitle')) {
+      document.getElementById('vgTitle').value = json.data.title;
+    }
+    if (json.data.rawScript && document.getElementById('vgScriptInput')) {
+      document.getElementById('vgScriptInput').value = json.data.rawScript;
+    }
+    if (json.data.youtubeMeta?.description && document.getElementById('vgCaption')) {
+      document.getElementById('vgCaption').value = json.data.youtubeMeta.description;
+    }
+    if (Array.isArray(json.data.youtubeMeta?.tags) && document.getElementById('vgTags')) {
+      document.getElementById('vgTags').value = json.data.youtubeMeta.tags.join(', ');
+    }
+
+    document.getElementById('vgProjectView').hidden = false;
+    vgRenderProject(json.data);
+  } catch (err) {
+    alert('Lỗi gọi Muse.ai: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '🚀 Tạo Kịch Bản + Video AI Trọn Gói Từ Muse.ai (1-Click Full Video)';
+  }
+}
+
+async function vgLoadAgentGwStatus() {
+  const badge = document.getElementById('vgAgentGwBadge');
+  if (!badge) return;
+  badge.innerText = '⏳ AgentGW: Đang kiểm tra...';
+  try {
+    const res = await fetch('/api/agentgw/status');
+    const json = await res.json();
+    if (json.markets) {
+      vgMarketsCache = json.markets;
+      vgUpdateVoiceOptions();
+    }
+    if (json.usage?.ok) {
+      badge.innerText = `✅ ${json.usage.summary}`;
+      badge.style.borderColor = '#4ade80';
+      badge.style.color = '#4ade80';
+    } else {
+      badge.innerText = `⚠️ AgentGW: ${json.usage?.summary || 'Chưa kết nối'}`;
+    }
+  } catch (err) {
+    badge.innerText = '⚠️ AgentGW: Offline';
+  }
+}
+
+function vgUpdateVoiceOptions() {
+  const marketEl = document.getElementById('vgMarket');
+  const voiceEl = document.getElementById('vgVoice');
+  if (!marketEl || !voiceEl) return;
+  const mKey = marketEl.value || 'US';
+  const preset = vgMarketsCache[mKey] || vgMarketsCache.US;
+  voiceEl.innerHTML = (preset.voices || [])
+    .map((v) => `<option value="${escapeHtml(v.id)}">${escapeHtml(v.label)}</option>`)
+    .join('');
+}
+
+async function vgWriteMarketScript() {
+  const topicInput = document.getElementById('vgTopicInput');
+  const scriptInput = document.getElementById('vgScriptInput');
+  const topic = (topicInput?.value || scriptInput?.value || '').trim();
+  if (!topic) {
+    return alert('Vui lòng nhập chủ đề hoặc ý tưởng ở ô Bước 1 (hoặc nhập bản nháp vào ô Kịch bản)!');
+  }
+
+  const market = document.getElementById('vgMarket')?.value || 'US';
+  const kind = document.getElementById('vgKind')?.value || 'story';
+  const model = document.getElementById('vgModel')?.value || 'agentgw-opus-4-8';
+  const btn = document.getElementById('vgWriteScriptBtn');
+
+  btn.disabled = true;
+  btn.innerText = `⏳ Đang viết kịch bản ${market} (${model})...`;
+
+  try {
+    const res = await fetch('/api/agentgw/script', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, kind, market, model }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert('Lỗi: ' + json.error);
+
+    const data = json.data;
+    if (data.title) document.getElementById('vgTitle').value = data.title;
+    if (data.rawScript) document.getElementById('vgScriptInput').value = data.rawScript;
+    if (data.lessonText) document.getElementById('vgLessonText').value = data.lessonText;
+    if (data.youtubeDescription && document.getElementById('vgCaption')) {
+      document.getElementById('vgCaption').value = data.youtubeDescription;
+    }
+    if (Array.isArray(data.youtubeTags) && document.getElementById('vgTags')) {
+      document.getElementById('vgTags').value = data.youtubeTags.join(', ');
+    }
+  } catch (err) {
+    alert('Lỗi gọi AgentGW: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '✨ AI Viết Kịch Bản Bản Địa';
+  }
+}
 
 async function vgPlanScenes() {
   const rawScript = document.getElementById('vgScriptInput').value.trim();
-  if (!rawScript) return alert('Vui lòng nhập kịch bản');
+  if (!rawScript) return alert('Vui lòng nhập kịch bản (hoặc bấm nút AI Viết Kịch Bản Bản Địa ở Bước 1)');
 
+  const market = document.getElementById('vgMarket')?.value || 'US';
+  const voice = document.getElementById('vgVoice')?.value;
+  const model = document.getElementById('vgModel')?.value || 'agentgw-opus-4-8';
+  const engine = document.getElementById('vgPlanEngine')?.value || 'muse';
+  const museUrl = document.getElementById('vgMuseUrl')?.value?.trim() || 'https://muse.ai';
   const btn = document.getElementById('vgPlanBtn');
   btn.disabled = true;
-  btn.innerText = '⏳ Đang chia scene (Gemini Ultra)...';
+  btn.innerText = `⏳ Đang chia scene & đạo diễn hình ảnh (${market} - ${engine.toUpperCase()})...`;
 
   try {
+    const tagsRaw = document.getElementById('vgTags')?.value || '';
+    const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+    const description = document.getElementById('vgCaption')?.value?.trim() || '';
+
     const res = await fetch('/api/video-gen/plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -677,6 +916,12 @@ async function vgPlanScenes() {
         title: document.getElementById('vgTitle').value.trim(),
         rawScript,
         lessonText: document.getElementById('vgLessonText').value.trim(),
+        market,
+        voice,
+        model,
+        engine,
+        museUrl,
+        youtubeMeta: { description, tags },
       }),
     });
     const json = await res.json();
@@ -689,26 +934,44 @@ async function vgPlanScenes() {
     alert('Lỗi: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.innerText = '🎬 Chia Scene';
+    btn.innerText = '🎬 Bước 2: Chia Scene & Lập Storyboard (Muse.ai / AgentGW)';
   }
 }
 
 function vgRenderProject(project) {
+  const metaLabel = document.getElementById('vgProjectMetaLabel');
+  if (metaLabel) {
+    metaLabel.innerText = `Project #${project.id} | Thị trường: ${project.market || 'US'} (${project.meta?.locale || 'en-US'}) | Giọng: ${project.meta?.voice || ''} | Trạng thái: ${project.status}`;
+  }
+
   const grid = document.getElementById('vgSceneGrid');
-  grid.innerHTML = project.scenes.map((scene) => `
+  grid.innerHTML = project.scenes.map((scene) => {
+    const videoPromptText = scene.videoPrompt || scene.imagePrompt || '';
+    const mediaUrl = scene.mediaFile
+      ? scene.mediaFile.includes('/storage/video-gen/')
+        ? `/storage/video-gen/${project.id}/output.mp4`
+        : `/media/${escapeHtml(scene.mediaFile.split('/').pop())}`
+      : '';
+    return `
     <div class="vf-scene-card">
-      <div class="vf-scene-status">${escapeHtml(scene.mediaStatus || 'pending')}</div>
-      ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split('/').pop())}" muted></video>` : ''}
-      <p>${escapeHtml(scene.text)}</p>
-      ${scene.mediaStatus !== 'video' ? `<button class="btn btn-secondary" onclick="vgRetryScene('${scene.id}')">Tạo lại media</button>` : ''}
+      <div class="vf-scene-status" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>Scene #${escapeHtml(String(scene.id))} • ${escapeHtml(scene.mediaStatus || 'pending')}</span>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="vgRetryScene('${escapeHtml(String(scene.id))}')">🔄 Tạo lại</button>
+      </div>
+      ${mediaUrl ? `<video src="${mediaUrl}" controls muted style="width: 100%; border-radius: 6px; margin: 6px 0;"></video>` : ''}
+      <p style="font-weight: 600; margin-bottom: 6px;">${escapeHtml(scene.text)}</p>
+      ${videoPromptText ? `<p style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">🎬 Prompt: ${escapeHtml(videoPromptText.slice(0, 160))}...</p>` : ''}
+      ${scene.error ? `<p style="font-size: 11px; color: #f87171;">⚠️ ${escapeHtml(scene.error)}</p>` : ''}
+      ${Array.isArray(scene.highlightWords) && scene.highlightWords.length ? `<div style="font-size: 11px; color: #facc15;">✨ Keywords: ${escapeHtml(scene.highlightWords.join(', '))}</div>` : ''}
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   document.getElementById('vgGenerateBtn').hidden = false;
 
   if (project.status === 'done' && project.outputPath) {
     const video = document.getElementById('vgFinalVideo');
-    video.src = `/storage/video-gen/${project.id}/output.mp4`;
+    video.src = `/storage/video-gen/${project.id}/output.mp4?t=${Date.now()}`;
     video.hidden = false;
     document.getElementById('vgPublishBox').hidden = false;
   }
@@ -716,7 +979,13 @@ function vgRenderProject(project) {
 
 async function vgRetryScene(sceneId) {
   try {
-    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/retry-scene/${sceneId}`, { method: 'POST' });
+    const mediaMode = document.getElementById('vgMediaMode')?.value || 'muse';
+    const museUrl = document.getElementById('vgMuseUrl')?.value?.trim() || 'https://muse.ai';
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/retry-scene/${sceneId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaMode, museUrl }),
+    });
     const json = await res.json();
     if (!json.success) return alert(json.error);
     vgRenderProject(json.data);
@@ -727,25 +996,31 @@ async function vgRetryScene(sceneId) {
 
 async function vgGenerateAndRender() {
   const btn = document.getElementById('vgGenerateBtn');
+  const mediaMode = document.getElementById('vgMediaMode')?.value || 'muse';
+  const museUrl = document.getElementById('vgMuseUrl')?.value?.trim() || 'https://muse.ai';
+  const voice = document.getElementById('vgVoice')?.value;
   btn.disabled = true;
-  btn.innerText = '⏳ Đang sinh media + render (có thể mất vài phút)...';
+  btn.innerText =
+    mediaMode === 'muse'
+      ? '⏳ Đang tạo video AI từng Scene trên Muse.ai + Ghép giọng đọc & Render MP4...'
+      : '⏳ Đang tổng hợp giọng đọc Neural + Render MP4 (có thể mất 1-3 phút)...';
 
-  // The /generate call blocks server-side until every scene is done (same
-  // pattern the old AI Video Factory used) — poll GET /api/video-gen/:id
-  // in the background so the scene grid shows live per-scene status
-  // instead of staying frozen for the whole duration.
   const pollInterval = setInterval(async () => {
     try {
       const statusRes = await fetch(`/api/video-gen/${vgCurrentProjectId}`);
       const statusJson = await statusRes.json();
       if (statusJson.success) vgRenderProject(statusJson.data);
     } catch (_err) {
-      // Ignore transient poll failures — the final fetch below is authoritative.
+      // Ignore transient poll failures
     }
   }, 4000);
 
   try {
-    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, { method: 'POST' });
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaMode, voice, museUrl }),
+    });
     const json = await res.json();
     if (!json.success) return alert(json.error);
     vgRenderProject(json.data);
@@ -754,7 +1029,35 @@ async function vgGenerateAndRender() {
   } finally {
     clearInterval(pollInterval);
     btn.disabled = false;
-    btn.innerText = '🎨 Sinh Media + Render';
+    btn.innerText = '🎨 Bước 3: Sinh Giọng Đọc Bản Địa + Render Video MP4';
+  }
+}
+
+async function vgPublishToYouTube() {
+  const btn = document.getElementById('vgPublishYoutubeBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerText = '⏳ Đang tải lên YouTube Data API v3...';
+  try {
+    const market = document.getElementById('vgMarket')?.value || 'US';
+    const title = document.getElementById('vgTitle')?.value?.trim() || '';
+    const description = document.getElementById('vgCaption')?.value?.trim() || '';
+    const tagsRaw = document.getElementById('vgTags')?.value || '';
+    const tags = tagsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+
+    const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/publish/youtube`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description, tags, market }),
+    });
+    const json = await res.json();
+    if (!json.success) return alert('Lỗi đăng YouTube: ' + json.error);
+    alert(`🎉 Đã đăng YouTube (${market}) thành công! URL: ${json.url || ''}`);
+  } catch (err) {
+    alert('Lỗi: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '📺 Đăng YouTube (Kênh US / JP / VN)';
   }
 }
 

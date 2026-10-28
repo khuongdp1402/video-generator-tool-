@@ -46,13 +46,37 @@ class Config:
     @property
     def env(self) -> dict:
         return {
+            "agentgw_api_key": os.environ.get("AGENTGW_API_KEY", ""),
+            "agentgw_base_url": os.environ.get(
+                "AGENTGW_BASE_URL", self.get("ai", "base_url", default="https://agentgw.cloud/v1")
+            ),
+            "agentgw_model": os.environ.get(
+                "AGENTGW_MODEL", self.get("ai", "model", default="agentgw-opus-4-8")
+            ),
             "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
             "youtube_client_secrets_file": os.environ.get(
                 "YOUTUBE_CLIENT_SECRETS_FILE", "client_secrets.json"
             ),
             "youtube_token_file": os.environ.get("YOUTUBE_TOKEN_FILE", "token.json"),
+            "youtube_token_file_us": os.environ.get("YOUTUBE_TOKEN_FILE_US", "token_us.json"),
+            "youtube_token_file_jp": os.environ.get("YOUTUBE_TOKEN_FILE_JP", "token_jp.json"),
             "tiktok_access_token": os.environ.get("TIKTOK_ACCESS_TOKEN", ""),
         }
+
+    def market(self, code: str | None = None) -> dict:
+        key = (code or "VI").strip().upper()
+        markets = self.get("markets", default={}) or {}
+        if key in markets:
+            return markets[key]
+        return markets.get("VI", {
+            "language": "vi",
+            "locale": "vi-VN",
+            "voice": self.get("tts", "voice", default="vi-VN-NamMinhNeural"),
+            "rate": self.get("tts", "rate", default="-5%"),
+            "font_family": self.get("render", "subtitle", "font_family", default="sans-serif"),
+            "youtube_category_id": self.get("youtube", "category_id", default="22"),
+            "youtube_token_file": "token.json",
+        })
 
 
 _config: Config | None = None
@@ -64,6 +88,7 @@ def load_config() -> Config:
         return _config
 
     load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(PROJECT_ROOT.parent / ".env")
 
     config_path = PROJECT_ROOT / "config.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
