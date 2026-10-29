@@ -183,11 +183,11 @@ async function generateSceneMedia(page, scene, mediaDir, opts = {}) {
     aspectRatio,
   });
 
-  // 1. Chế độ Image Stitch (Chỉ tạo ảnh minh họa toàn màn hình)
-  if (generationMode === 'image_stitch') {
+  // 1. Chế độ Tạo Ảnh AI (text_to_image) hoặc Image Stitch (Chỉ tạo ảnh minh họa toàn màn hình)
+  if (generationMode === 'text_to_image' || generationMode === 'image_stitch') {
     await attachFilesOnGemini(page, opts.refs || scene.refs || []);
     const knownImgs = await getKnownGeminiLargeImageSrcs(page);
-    await promptInput.first().fill(`Generate a ${ratioSpec} illustration image: ${aligned.alignedImagePrompt}`);
+    await promptInput.first().fill(`Generate a high-resolution ${ratioSpec} illustration image: ${aligned.alignedImagePrompt}`);
     await promptInput.first().press('Enter');
 
     const start = Date.now();
@@ -200,7 +200,7 @@ async function generateSceneMedia(page, scene, mediaDir, opts = {}) {
           fs.writeFileSync(pngOutputPath, buf);
           return {
             mediaStatus: 'image',
-            generationMode: 'image_stitch',
+            generationMode,
             mediaFile: `media/${filePrefix}.png`,
             localPath: pngOutputPath,
             threadUrl: page.url(),
@@ -212,9 +212,16 @@ async function generateSceneMedia(page, scene, mediaDir, opts = {}) {
     throw new Error(`Hết thời gian chờ Gemini Ultra tạo ảnh cho scene ${scene.id}`);
   }
 
-  // 2. Chế độ Image-to-Video (Tạo Keyframe trên Imagen 3 -> biến thành Video chuyển động Veo ngay trong cùng hội thoại!)
+  // 2. Chế độ Image-to-Video (Tạo Keyframe trên Imagen 3 hoặc lấy ảnh mẫu -> biến thành Video chuyển động Veo ngay trong cùng hội thoại!)
   if (generationMode === 'image_to_video') {
-    const refs = (opts.refs || scene.refs || []).filter((p) => p && fs.existsSync(p));
+    const explicitKeyframe =
+      (opts.keyframePath && fs.existsSync(opts.keyframePath) && opts.keyframePath) ||
+      (scene.keyframePath && fs.existsSync(scene.keyframePath) && scene.keyframePath) ||
+      null;
+    const refs = [
+      ...(explicitKeyframe ? [explicitKeyframe] : []),
+      ...((opts.refs || scene.refs || []).filter((p) => p && p !== explicitKeyframe && fs.existsSync(p))),
+    ];
     if (refs.length > 0) {
       await attachFilesOnGemini(page, refs);
     } else if (!fs.existsSync(pngOutputPath)) {

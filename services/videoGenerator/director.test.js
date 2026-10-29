@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildDirectorPrompt,
+  isShortKeywordInput,
   normalizeScenes,
   enforceSceneGoalAlignment,
   validateSceneGoalAlignment,
@@ -56,7 +57,7 @@ test('enforceSceneGoalAlignment and validateSceneGoalAlignment support image_to_
     videoPrompt: 'Slow push in as rain falls outside',
   };
 
-  for (const mode of ['image_to_video', 'text_to_video', 'video_to_video', 'image_stitch']) {
+  for (const mode of ['text_to_image', 'image_to_video', 'text_to_video', 'video_to_video', 'image_stitch']) {
     const check = validateSceneGoalAlignment(rawScene, {
       kind: 'psych_split',
       generationMode: mode,
@@ -69,6 +70,29 @@ test('enforceSceneGoalAlignment and validateSceneGoalAlignment support image_to_
     assert.match(check.alignedVideoPrompt, /SỨC MẠNH CỦA SỰ ĐIỀM TĨNH/);
     assert.match(check.alignedVideoPrompt, new RegExp(`mode=${mode}`));
   }
+});
+
+test('detects short keywords and formats 1-scene or multi-scene keyword director prompts', () => {
+  assert.equal(isShortKeywordInput('Hiệu ứng tâm lý Romeo và Juliet'), true);
+  assert.equal(
+    isShortKeywordInput(
+      'Câu một dài. Câu hai giải thích chi tiết hơn rất nhiều. Câu ba tiếp tục phân tích chiều sâu tâm lý học hành vi của con người.'
+    ),
+    false
+  );
+
+  const singleClipPrompt = buildDirectorPrompt('Chú mèo đầu bếp nấu mì Ramen', 'story', {
+    sceneCount: 1,
+    market: 'VI',
+  });
+  assert.match(singleClipPrompt, /TỪ KHÓA \/ Ý TƯỞNG GỐC/);
+  assert.match(singleClipPrompt, /ĐÚNG 1 scene duy nhất/);
+
+  const multiSceneKwPrompt = buildDirectorPrompt('Hiệu ứng tâm lý Romeo và Juliet', 'handdrawn', {
+    targetDuration: 30,
+    market: 'VI',
+  });
+  assert.match(multiSceneKwPrompt, /TỰ SÁNG TẠO kịch bản/);
 });
 
 

@@ -445,14 +445,20 @@ async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = 
   throw new Error('Hết thời gian chờ Muse sinh video MP4 mới. Đang chuyển sang phương án dự phòng.');
 }
 
-async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US') {
-  const prompt = buildDirectorPrompt(rawScript, kind, market);
+async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'VI', opts = {}) {
+  const options = typeof opts === 'object' && opts !== null ? opts : {};
+  const prompt = buildDirectorPrompt(rawScript, kind, { ...options, market });
+  const normOpts = {
+    layoutMode: options.layoutMode,
+    generationMode: options.generationMode,
+    sourceVideoPath: options.sourceVideoPath,
+  };
   let reply;
   try {
     reply = await sendMusePromptAndWaitForReply(page, prompt, { timeoutMs: 45000 });
     const parsed = extractJson(reply);
     return {
-      scenes: normalizeScenes(parsed.scenes),
+      scenes: normalizeScenes(parsed.scenes, normOpts),
       title: parsed.title || '',
       lessonText: parsed.lessonText || '',
       youtubeMeta: parsed.youtubeMeta || null,
@@ -466,7 +472,7 @@ async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US'
     );
     const parsed = extractJson(retryReply);
     return {
-      scenes: normalizeScenes(parsed.scenes),
+      scenes: normalizeScenes(parsed.scenes, normOpts),
       title: parsed.title || '',
       lessonText: parsed.lessonText || '',
       youtubeMeta: parsed.youtubeMeta || null,
@@ -535,8 +541,8 @@ function buildMuseSceneVideoPrompt(scene, opts = {}) {
     aspectRatio,
   });
 
-  if (generationMode === 'image_stitch') {
-    return `Generate a single ${ratioSpec} illustration image right now (do not ask questions, call your image generation tool immediately): ${aligned.alignedImagePrompt}`;
+  if (generationMode === 'text_to_image' || generationMode === 'image_stitch') {
+    return `Generate a single high-resolution ${ratioSpec} illustration image right now (do NOT generate a video, do NOT ask questions, call your image generation tool immediately): ${aligned.alignedImagePrompt}`;
   }
 
   if (generationMode === 'image_to_video') {
@@ -603,14 +609,14 @@ async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
     generationMode,
   });
 
-  // 1. Chế độ Image Stitch (Tạo ảnh 2D + ghép Remotion)
-  if (generationMode === 'image_stitch') {
+  // 1. Chế độ Tạo Ảnh AI (text_to_image) hoặc Image Stitch (Tạo ảnh 2D + ghép Remotion)
+  if (generationMode === 'text_to_image' || generationMode === 'image_stitch') {
     const knownImgSrcs = await getLargeImageSrcsOnMuse(page);
     const initialVideoCount = await countNonAvatarVideos(page);
     await attachFilesOnMuse(page, opts.refs || scene.refs || []);
     const imageRequestPrompt = buildMuseSceneVideoPrompt(alignedScene, {
       ...opts,
-      generationMode: 'image_stitch',
+      generationMode,
     });
     await submitPromptOnMuse(page, imageRequestPrompt);
 
@@ -624,33 +630,36 @@ async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
         const buf = Buffer.from(pngBase64, 'base64');
         if (buf.length > 2000) {
           fs.writeFileSync(pngOutputPath, buf);
-          console.log(`[Muse.ai · image_stitch] Đã lưu ảnh Scene ${scene.id}: ${pngOutputPath}`);
+          console.log(`[Muse.ai · ${generationMode}] Đã lưu ảnh Scene ${scene.id}: ${pngOutputPath}`);
           return {
             mediaStatus: 'image',
-            generationMode: 'image_stitch',
+            generationMode,
             mediaFile: `media/${filePrefix}.png`,
             localPath: pngOutputPath,
           };
         }
       }
-      const videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
-      if (videoUrl) {
-        await downloadVideoUrlOrBlobToDisk(page, videoUrl, mp4OutputPath);
-        return {
-          mediaStatus: 'video',
-          generationMode: 'image_stitch',
-          mediaFile: `media/${filePrefix}.mp4`,
-          localPath: mp4OutputPath,
-        };
+      if (generationMode === 'image_stitch') {
+        const videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
+        if (videoUrl) {
+          await downloadVideoUrlOrBlobToDisk(page, videoUrl, mp4OutputPath);
+          return {
+            mediaStatus: 'video',
+            generationMode: 'image_stitch',
+            mediaFile: `media/${filePrefix}.mp4`,
+            localPath: mp4OutputPath,
+          };
+        }
       }
       await page.waitForTimeout(pollMs);
     }
-    throw new Error(`Hết thời gian chờ Muse.ai tạo hình ảnh (image_stitch) cho Scene ${scene.id}`);
+    throw new Error(`Hết thời gian chờ Muse.ai tạo hình ảnh (${generationMode}) cho Scene ${scene.id}`);
   }
 
   // 2. Chế độ Image-to-Video (Tạo/Lấy Keyframe chuẩn mục tiêu -> Animate thành Video MP4)
   if (generationMode === 'image_to_video') {
     let keyframePath =
+      (opts.keyframePath && fs.existsSync(opts.keyframePath) && opts.keyframePath) ||
       (scene.keyframePath && fs.existsSync(scene.keyframePath) && scene.keyframePath) ||
       (fs.existsSync(pngOutputPath) && pngOutputPath) ||
       null;

@@ -233,6 +233,37 @@ function setupEventListeners() {
   // Upload source video for Video-to-Video (V2V)
   document.getElementById('vgSourceVideoFile')?.addEventListener('change', handleVgSourceVideoUpload);
 
+  // Keyword quick sample chips
+  document.querySelectorAll('.kw-sample-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const kw = chip.getAttribute('data-kw') || '';
+      const targetKind = chip.getAttribute('data-kind') || '';
+      if (scriptInput && kw) {
+        scriptInput.value = kw;
+        vgCurrentProjectId = null;
+      }
+      const kindEl = document.getElementById('vgKind');
+      if (kindEl && targetKind) {
+        kindEl.value = targetKind;
+        kindEl.dispatchEvent(new Event('change'));
+      }
+      showToast(`🔑 Đã điền Keyword: "${kw}"`);
+    });
+  });
+
+  // Sync AI Engine + Image/Video Output Mode + Output Scale UI
+  document.getElementById('vgAiEngine')?.addEventListener('change', syncVgKeywordUiControls);
+  document.getElementById('vgGenerationMode')?.addEventListener('change', () => {
+    const gm = document.getElementById('vgGenerationMode')?.value;
+    const scaleEl = document.getElementById('vgOutputScale');
+    if (gm === 'image_stitch' && scaleEl) {
+      scaleEl.value = 'full_story';
+    }
+    syncVgKeywordUiControls();
+  });
+  document.getElementById('vgOutputScale')?.addEventListener('change', syncVgKeywordUiControls);
+  syncVgKeywordUiControls();
+
   // Studio Voice Preview Button
   document.getElementById('btnPreviewVoice')?.addEventListener('click', previewStudioVoice);
 
@@ -433,9 +464,66 @@ async function handleVgSourceVideoUpload(e) {
     if (pathEl) pathEl.value = json.file.path;
     const genModeEl = document.getElementById('vgGenerationMode');
     if (genModeEl) genModeEl.value = 'video_to_video';
+    syncVgKeywordUiControls();
     showToast(`🎞️ Đã nạp video mẫu "${file.name}" cho chế độ Video-to-Video!`);
   } catch (err) {
     alert('Lỗi tải video mẫu: ' + err.message);
+  }
+}
+
+function getAiEngineShortLabel(aiEngine) {
+  switch (aiEngine) {
+    case 'muse_only':
+      return '🟣 Muse.ai';
+    case 'gemini_only':
+      return '🔵 Gemini Ultra';
+    case 'gemini_first':
+      return '🔵 Gemini Ultra (#1) ➔ Muse.ai (#2)';
+    case 'remotion_only':
+      return '🎞️ Đồ Họa Nội Bộ';
+    default:
+      return '⚡ Muse.ai (#1) ➔ Gemini Ultra (#2)';
+  }
+}
+
+function getGenModeShortLabel(generationMode) {
+  switch (generationMode) {
+    case 'text_to_image':
+      return '🖼️ Ảnh AI';
+    case 'text_to_video':
+      return '🎥 Video (Text-to-Video)';
+    case 'video_to_video':
+      return '🔄 Video (Video-to-Video)';
+    case 'image_stitch':
+      return '⚡ Video Ảnh Ghép';
+    default:
+      return '🎬 Video (Image-to-Video)';
+  }
+}
+
+function syncVgKeywordUiControls() {
+  const aiEngine = document.getElementById('vgAiEngine')?.value || 'muse_first';
+  const genMode = document.getElementById('vgGenerationMode')?.value || 'image_to_video';
+  const outputScale = document.getElementById('vgOutputScale')?.value || 'direct_clip';
+
+  const v2vRow = document.getElementById('vgSourceVideoRow');
+  if (v2vRow) {
+    const showV2v = genMode === 'video_to_video';
+    v2vRow.hidden = !showV2v;
+    v2vRow.style.display = showV2v ? 'flex' : 'none';
+  }
+
+  const voiceSection = document.getElementById('vgVoiceAndMetaSection');
+  if (voiceSection) {
+    const needsVoice = genMode !== 'text_to_image' && (outputScale === 'full_story' || genMode === 'image_stitch');
+    voiceSection.style.opacity = needsVoice ? '1' : '0.55';
+  }
+
+  const primaryBtn = document.getElementById('vgMusePrimaryGenBtn');
+  if (primaryBtn && !primaryBtn.disabled) {
+    const aiLabel = getAiEngineShortLabel(aiEngine);
+    const modeLabel = getGenModeShortLabel(genMode);
+    primaryBtn.innerText = `🚀 Tạo ${modeLabel} Từ Keyword Trên ${aiLabel}`;
   }
 }
 
@@ -453,14 +541,20 @@ function getVgCommonPayload() {
   const voiceRateEl = document.getElementById('vgVoiceRate');
   const aiEngineEl = document.getElementById('vgAiEngine');
   const genModeEl = document.getElementById('vgGenerationMode');
+  const outputScaleEl = document.getElementById('vgOutputScale');
   const sourceVideoEl = document.getElementById('vgSourceVideoPath');
 
   const voice = voiceEl?.value || 'vi-VN-NamMinhNeural';
   const voiceRate = voiceRateEl?.value || '+20%';
   const market = voice.startsWith('en-') ? 'US' : voice.startsWith('ja-') ? 'JP' : 'VI';
   const aiEngine = aiEngineEl?.value || 'muse_first';
-  const mediaMode = aiEngine === 'gemini_first' ? 'gemini' : 'muse';
+  const mediaMode = aiEngine.startsWith('gemini') ? 'gemini' : 'muse';
   const generationMode = genModeEl?.value || 'image_to_video';
+  const outputScale = outputScaleEl?.value || 'direct_clip';
+  const withVoiceover =
+    generationMode === 'text_to_image'
+      ? false
+      : outputScale === 'full_story' || generationMode === 'image_stitch';
   const sourceVideoPath = sourceVideoEl?.value?.trim() || '';
 
   return {
@@ -470,7 +564,7 @@ function getVgCommonPayload() {
     targetDuration: Number(durationEl?.value) || 30,
     continuityOffset: Number(continuityEl?.value) || 0.3,
     channelName: channelEl?.value?.trim() || 'LÀNH TÂM',
-    title: titleEl?.value?.trim() || 'TÍNH CÁCH PHẢN BÁC',
+    title: titleEl?.value?.trim() || '',
     lessonText: lessonEl?.value?.trim() || '',
     projectId: projectEl?.value || null,
     voice,
@@ -479,6 +573,8 @@ function getVgCommonPayload() {
     aiEngine,
     mediaMode,
     generationMode,
+    outputScale,
+    withVoiceover,
     sourceVideoPath,
     refs: (vgUploadedRefs || []).map(r => r.ref || r.path || r.url).filter(Boolean)
   };
@@ -486,7 +582,7 @@ function getVgCommonPayload() {
 
 async function openMuseGeminiChromeHandler() {
   try {
-    showToast('🌐 Đang mở Chrome AI (Cổng 9222) với Tab 1: Muse.ai (#1) & Tab 2: Gemini Ultra (#2)...');
+    showToast('👻 Đang kích hoạt chạy ẩn Muse.ai (9222) & Gemini Ultra (9223)...');
     const res = await fetch('/api/muse/open-browser', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -494,7 +590,7 @@ async function openMuseGeminiChromeHandler() {
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Không mở được Chrome');
-    showToast('✅ ' + (json.message || 'Đã mở Chrome Muse.ai (#1) & Gemini Ultra (#2)!'));
+    showToast('✅ ' + (json.message || 'Đã kích hoạt chạy ẩn Muse.ai (#1) & Gemini Ultra (#2)!'));
   } catch (err) {
     alert('Lỗi mở trình duyệt Chrome AI: ' + err.message);
   }
@@ -505,46 +601,103 @@ let vgLastPlannedScript = '';
 async function vgMusePrimaryGenerateCurrent() {
   const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
   if (!rawScript && !vgCurrentProjectId) {
-    return alert('Vui lòng nhập hoặc chọn chủ đề tự sinh kịch bản trước khi triển khai!');
+    return alert('Vui lòng nhập Keyword (từ khóa) hoặc ý tưởng trước khi bấm Tạo!');
   }
+
+  const common = getVgCommonPayload();
+  if (common.aiEngine === 'remotion_only') {
+    await vgInstantRenderCurrent();
+    return;
+  }
+  if (common.generationMode === 'video_to_video' && !common.sourceVideoPath) {
+    return alert('Chế độ Video-to-Video cần 1 Video mẫu. Vui lòng bấm "📂 Tải Video Mẫu" trước!');
+  }
+
+  const btn = document.getElementById('vgMusePrimaryGenBtn');
+  const aiLabel = getAiEngineShortLabel(common.aiEngine);
+  const modeLabel = getGenModeShortLabel(common.generationMode);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = `⏳ Đang tạo ${modeLabel} từ Keyword trên ${aiLabel}...`;
+  }
+
+  try {
+    showToast(`🚀 Đang gửi Keyword sang ${aiLabel} để tạo ${modeLabel}...`);
+    const res = await fetch('/api/video-gen/keyword-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...common,
+        keyword: rawScript,
+        rawScript
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không thể tạo từ Keyword');
+
+    vgCurrentProjectId = json.data.id;
+    vgLastPlannedScript = rawScript;
+    const projView = document.getElementById('vgProjectView');
+    if (projView) projView.hidden = false;
+    vgRenderProject(json.data);
+    await loadVgQueue();
+    await loadUnifiedLibrary();
+    showToast(`✅ Đã tạo thành công ${modeLabel} trên ${aiLabel}!`);
+  } catch (err) {
+    alert(`Lỗi tạo ${modeLabel} trên ${aiLabel}: ` + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      syncVgKeywordUiControls();
+    }
+  }
+}
+
+async function vgAnimateGeneratedImage(imageUrl, scenePrompt = '') {
+  if (!imageUrl) return;
+  const common = getVgCommonPayload();
+  const targetEngine = common.aiEngine === 'remotion_only' ? 'muse_first' : common.aiEngine;
+  const aiLabel = getAiEngineShortLabel(targetEngine);
+  const kw = (scenePrompt || document.getElementById('vgScriptInput')?.value || 'Animate this illustration naturally').trim();
 
   const btn = document.getElementById('vgMusePrimaryGenBtn');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = '⏳ Đang tạo hình ảnh 2D trên Muse.ai (#1) ➔ Gemini Ultra (#2) + Render...';
+    btn.innerText = `⏳ Đang biến Ảnh thành Video MP4 (Image-to-Video) trên ${aiLabel}...`;
   }
 
   try {
-    const common = getVgCommonPayload();
-    if (common.aiEngine === 'remotion_only') {
-      await vgInstantRenderCurrent();
-      return;
-    }
+    showToast(`🎬 Đang gửi ảnh sang ${aiLabel} để tạo chuyển động Video MP4...`);
+    const res = await fetch('/api/video-gen/keyword-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...common,
+        aiEngine: targetEngine,
+        generationMode: 'image_to_video',
+        outputScale: 'direct_clip',
+        withVoiceover: false,
+        keyframePath: imageUrl,
+        keyword: kw,
+        rawScript: kw
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không thể tạo video từ ảnh');
 
-    if (!vgCurrentProjectId || vgLastPlannedScript !== rawScript) {
-      showToast('🎬 Bước 1/2: Đang chia phân cảnh kịch bản...');
-      const planRes = await fetch('/api/video-gen/plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...common, rawScript })
-      });
-      const planJson = await planRes.json();
-      if (!planJson.success) throw new Error(planJson.error);
-      vgCurrentProjectId = planJson.data.id;
-      vgLastPlannedScript = rawScript;
-      const projView = document.getElementById('vgProjectView');
-      if (projView) projView.hidden = false;
-      vgRenderProject(planJson.data);
-    }
-
-    showToast('🎨 Bước 2/2: Đang tạo hình minh họa từng cảnh trên Muse.ai (#1) / Gemini Ultra (#2) + Giọng đọc & Render MP4...');
-    await vgGenerateAndRender();
+    vgCurrentProjectId = json.data.id;
+    const projView = document.getElementById('vgProjectView');
+    if (projView) projView.hidden = false;
+    vgRenderProject(json.data);
+    await loadVgQueue();
+    await loadUnifiedLibrary();
+    showToast(`🎉 Đã biến Ảnh thành Video MP4 trên ${aiLabel}!`);
   } catch (err) {
-    alert('Lỗi triển khai video Muse.ai / Gemini Ultra: ' + err.message);
+    alert('Lỗi tạo Video từ Ảnh: ' + err.message);
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerText = '🚀 Triển Khai Video Qua Muse.ai (#1) ➔ Gemini Ultra (#2) + Render MP4';
+      syncVgKeywordUiControls();
     }
   }
 }
@@ -882,29 +1035,78 @@ function vgRenderProject(project) {
   const countBadge = document.getElementById('vgSceneCountBadge');
   if (countBadge) countBadge.innerText = `${(project.scenes || []).length} cảnh`;
   const titleEl = document.getElementById('vgActiveProjectTitle');
-  if (titleEl) titleEl.innerText = `Chi tiết phân cảnh (${(project.scenes || []).length} cảnh - ${project.title || ''})`;
+  const isImageProject = project.outputType === 'image' || project.generationMode === 'text_to_image';
+  if (titleEl) {
+    titleEl.innerText = isImageProject
+      ? `🖼️ Kết quả Ảnh AI (${project.title || project.rawScript || ''})`
+      : `🎬 Kết quả & Phân cảnh (${(project.scenes || []).length} cảnh · ${project.title || ''})`;
+  }
+
+  // Hiển thị hộp Ảnh AI nếu dự án ở chế độ Tạo Ảnh AI
+  const imgBox = document.getElementById('vgGeneratedImagesBox');
+  if (imgBox) {
+    const imgScenes = (project.scenes || []).filter(s => s.mediaFile && /\.(png|jpe?g|webp)$/i.test(s.mediaFile));
+    if (isImageProject && imgScenes.length > 0) {
+      imgBox.hidden = false;
+      imgBox.innerHTML = `
+        <div style="font-weight:700;color:#6ee7b7;margin-bottom:8px;">
+          ✅ Đã tạo ${imgScenes.length} Ảnh AI từ Keyword! Bạn có thể tải về hoặc biến ngay thành Video MP4:
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;">
+          ${imgScenes.map((sc, i) => {
+            const fname = sc.mediaFile.split(/[\\/]/).pop();
+            const imgUrl = `/media/${escapeHtml(fname)}`;
+            const provBadge = sc.provider === 'gemini_ultra' ? '🔵 Gemini Ultra' : '🟣 Muse.ai';
+            const safePrompt = escapeHtml(sc.text || project.rawScript || '').replace(/'/g, '&#39;');
+            return `
+              <div style="background:#0f172a;border:1px solid rgba(255,255,255,0.14);border-radius:10px;padding:8px;text-align:center;">
+                <div style="font-size:11px;color:#a5b4fc;font-weight:700;margin-bottom:6px;">${provBadge} · Ảnh #${i + 1}</div>
+                <img src="${imgUrl}?t=${Date.now()}" alt="Generated AI Image ${i + 1}" style="width:100%;max-height:320px;object-fit:contain;border-radius:8px;margin-bottom:8px;" />
+                <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+                  <a class="btn btn-secondary btn-sm" href="${imgUrl}" download style="text-decoration:none;">⬇️ Tải Ảnh PNG</a>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="vgAnimateGeneratedImage('${imgUrl}', '${safePrompt}')">🎬 Biến Thành Video MP4</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    } else {
+      imgBox.hidden = true;
+      imgBox.innerHTML = '';
+    }
+  }
 
   if (grid) {
     grid.innerHTML = (project.scenes || []).map((scene, idx) => {
       const mediaFileName = scene.mediaFile ? scene.mediaFile.split(/[\\/]/).pop() : '';
       const isImageMedia = /\.(png|jpe?g|webp)$/i.test(mediaFileName);
+      const mediaUrl = mediaFileName ? `/media/${escapeHtml(mediaFileName)}` : '';
+      const provBadge = scene.provider === 'gemini_ultra'
+        ? '<span style="color:#60a5fa;font-weight:700;">🔵 Gemini Ultra</span>'
+        : scene.provider === 'muse.ai'
+        ? '<span style="color:#c084fc;font-weight:700;">🟣 Muse.ai</span>'
+        : `<span>${escapeHtml(scene.mediaStatus || 'pending')}</span>`;
       const mediaPreviewHtml = !mediaFileName
         ? ''
         : isImageMedia
-          ? `<img src="/media/${escapeHtml(mediaFileName)}?t=${Date.now()}" alt="Scene ${idx + 1}" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-bottom:8px;background:#0f172a;border:1px solid rgba(255,255,255,0.12);" />`
-          : `<video src="/media/${escapeHtml(mediaFileName)}?t=${Date.now()}" controls muted></video>`;
+          ? `<img src="${mediaUrl}?t=${Date.now()}" alt="Scene ${idx + 1}" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-bottom:8px;background:#0f172a;border:1px solid rgba(255,255,255,0.12);" />`
+          : `<video src="${mediaUrl}?t=${Date.now()}" controls muted></video>`;
+      const safePrompt = escapeHtml(scene.text || project.rawScript || '').replace(/'/g, '&#39;');
       return `
       <div class="vf-scene-card">
         <div class="vf-scene-status">
-          <span>Cảnh #${idx + 1} (${escapeHtml(scene.visualMode || scene.type)})</span>
-          <span>${escapeHtml(scene.mediaStatus || 'pending')}</span>
+          <span>Cảnh #${idx + 1} (${escapeHtml(scene.generationMode || scene.type || 'media')})</span>
+          ${provBadge}
         </div>
         ${mediaPreviewHtml}
-        <p style="color: #f8fafc; font-weight: 600;">🇻🇳 ${escapeHtml(scene.text)}</p>
+        <p style="color: #f8fafc; font-weight: 600;">🔑 ${escapeHtml(scene.text)}</p>
         ${scene.textEn ? `<p style="font-size: 11.5px; color: #94a3b8;">🇬🇧 ${escapeHtml(scene.textEn)}</p>` : ''}
         ${scene.audioFile ? `<audio controls preload="none" src="/${escapeHtml(scene.audioFile)}?t=${Date.now()}" style="width:100%; height:28px; margin-top:4px;"></audio>` : ''}
-        <div style="display:flex; gap:6px; margin-top:6px;">
-          <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại Media</button>
+        <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại trên AI đang chọn</button>
+          ${isImageMedia && mediaUrl ? `<a class="btn btn-secondary btn-sm" href="${mediaUrl}" download style="text-decoration:none;">⬇️ Tải Ảnh</a>` : ''}
+          ${isImageMedia && mediaUrl ? `<button type="button" class="btn btn-primary btn-sm" onclick="vgAnimateGeneratedImage('${mediaUrl}', '${safePrompt}')">🎬 Tạo Video (I2V)</button>` : ''}
         </div>
       </div>
     `;
@@ -914,25 +1116,36 @@ function vgRenderProject(project) {
   const genBtn = document.getElementById('vgGenerateBtn');
   if (genBtn) genBtn.hidden = false;
   const renderBtn = document.getElementById('vgRenderOnlyBtn') || document.getElementById('vgRenderOnlyProjectBtn');
-  if (renderBtn) renderBtn.hidden = false;
+  if (renderBtn) renderBtn.hidden = isImageProject;
 
-  if (project.status === 'done' && project.outputPath) {
-    const video = document.getElementById('vgFinalVideo');
+  const videoWrap = document.getElementById('vgFinalVideoWrap');
+  const video = document.getElementById('vgFinalVideo');
+  const dlLink = document.getElementById('vgDownloadVideoLink');
+  const pubBox = document.getElementById('vgPublishBox');
+
+  if (!isImageProject && project.status === 'done' && project.outputPath) {
+    const outUrl = `/storage/video-gen/${project.id}/output.mp4`;
+    if (videoWrap) videoWrap.hidden = false;
     if (video) {
-      video.src = `/storage/video-gen/${project.id}/output.mp4?t=${Date.now()}`;
+      video.src = `${outUrl}?t=${Date.now()}`;
       video.hidden = false;
     }
-    const pubBox = document.getElementById('vgPublishBox');
+    if (dlLink) dlLink.href = outUrl;
     if (pubBox) pubBox.hidden = false;
     const sendRemakeBtn = document.getElementById('vgSendRemakeBtn') || document.getElementById('vgSendToRemakeBtn');
     if (sendRemakeBtn) sendRemakeBtn.hidden = false;
+  } else {
+    if (videoWrap) videoWrap.hidden = true;
+    if (video) video.hidden = true;
+    if (pubBox) pubBox.hidden = true;
   }
 }
 
 async function vgRetryScene(projectId, sceneId) {
   try {
     const common = getVgCommonPayload();
-    showToast(`🔄 Đang tạo lại media (${common.generationMode}) cho cảnh (Muse.ai #1 ➔ Gemini Ultra #2)...`);
+    const aiLabel = getAiEngineShortLabel(common.aiEngine);
+    showToast(`🔄 Đang tạo lại (${common.generationMode}) trên ${aiLabel}...`);
     const res = await fetch(`/api/video-gen/${projectId}/retry-scene/${sceneId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -947,7 +1160,7 @@ async function vgRetryScene(projectId, sceneId) {
     if (!json.success) return alert(json.error);
     vgRenderProject(json.data);
     await loadVgQueue();
-    showToast('✅ Đã tạo lại media cho cảnh hoàn tất!');
+    showToast(`✅ Đã tạo lại trên ${aiLabel} hoàn tất!`);
   } catch (err) {
     alert('Lỗi: ' + err.message);
   }
@@ -955,10 +1168,12 @@ async function vgRetryScene(projectId, sceneId) {
 
 async function vgGenerateAndRender() {
   if (!vgCurrentProjectId) return;
+  const common = getVgCommonPayload();
+  const aiLabel = getAiEngineShortLabel(common.aiEngine);
   const btn = document.getElementById('vgGenerateBtn');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = '⏳ Đang sinh Video (Muse.ai #1 ➔ Gemini #2) + Render...';
+    btn.innerText = `⏳ Đang chạy trên ${aiLabel}...`;
   }
 
   const pollInterval = setInterval(async () => {
@@ -970,7 +1185,6 @@ async function vgGenerateAndRender() {
   }, 4000);
 
   try {
-    const common = getVgCommonPayload();
     const res = await fetch(`/api/video-gen/${vgCurrentProjectId}/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -978,6 +1192,8 @@ async function vgGenerateAndRender() {
         aiEngine: common.aiEngine,
         mediaMode: common.mediaMode,
         generationMode: common.generationMode,
+        outputScale: common.outputScale,
+        withVoiceover: common.withVoiceover,
         sourceVideoPath: common.sourceVideoPath,
         voice: common.voice,
         voiceRate: common.voiceRate
@@ -988,14 +1204,14 @@ async function vgGenerateAndRender() {
     vgRenderProject(json.data);
     await loadVgQueue();
     await loadUnifiedLibrary();
-    showToast('🚀 Đã sinh Media qua Muse.ai / Gemini Ultra & Render hoàn tất!');
+    showToast(`🚀 Đã hoàn tất trên ${aiLabel}!`);
   } catch (err) {
     alert('Lỗi: ' + err.message);
   } finally {
     clearInterval(pollInterval);
     if (btn) {
       btn.disabled = false;
-      btn.innerText = '🚀 Sinh Video (Muse.ai #1 ➔ Gemini #2) + Render';
+      btn.innerText = '🚀 Chạy Lại Trên AI Đang Chọn';
     }
   }
 }
@@ -1060,8 +1276,10 @@ function renderVgQueueTable() {
   }
 
   tbody.innerHTML = vgQueueData.map((item, idx) => {
-    const hasOutput = item.status === 'done' && item.outputPath;
+    const hasVideoOutput = item.status === 'done' && item.outputPath;
+    const hasImageOutput = item.status === 'done' && item.outputType === 'image' && Array.isArray(item.outputImages) && item.outputImages.length > 0;
     const statusColor = item.status === 'done' ? '#34d399' : item.status === 'failed' ? '#f87171' : '#38bdf8';
+    const engineTag = item.aiEngine === 'gemini_only' ? 'Gemini' : item.aiEngine === 'muse_only' ? 'Muse' : 'Auto';
     return `
       <tr>
         <td><input type="checkbox" class="vg-queue-check" value="${item.id}"></td>
@@ -1073,10 +1291,10 @@ function renderVgQueueTable() {
           </div>
         </td>
         <td>
-          <span class="badge badge-accent">${escapeHtml(item.kind)}</span>
-          <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(item.layoutMode || 'full')} • ${escapeHtml(item.aspectRatio)}</div>
+          <span class="badge badge-accent">${escapeHtml(item.kind)} · ${engineTag}</span>
+          <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(item.generationMode || 'video')} • ${escapeHtml(item.aspectRatio)}</div>
         </td>
-        <td>${item.targetDuration || 15}s (${(item.scenes || []).length} cảnh)</td>
+        <td>${item.outputType === 'image' ? `${(item.scenes || []).length} ảnh` : `${item.targetDuration || 15}s (${(item.scenes || []).length} cảnh)`}</td>
         <td>${(item.refs || []).length} ảnh</td>
         <td>
           <span style="font-weight:700; color:${statusColor}; text-transform:uppercase; font-size:11px;">
@@ -1084,15 +1302,17 @@ function renderVgQueueTable() {
           </span>
         </td>
         <td>
-          ${hasOutput
+          ${hasVideoOutput
             ? `<a href="/storage/video-gen/${item.id}/output.mp4" target="_blank" style="color:#34d399; font-weight:700; font-size:12px;">▶ Xem MP4</a>`
-            : `<span style="color:var(--text-muted); font-size:11px;">Chưa render</span>`}
+            : hasImageOutput
+            ? `<a href="${escapeHtml(item.outputImages[0])}" target="_blank" style="color:#a5b4fc; font-weight:700; font-size:12px;">🖼️ Xem Ảnh</a>`
+            : `<span style="color:var(--text-muted); font-size:11px;">Chưa xong</span>`}
         </td>
         <td>
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn btn-secondary btn-sm" onclick="inspectQueueItem('${item.id}')">👁️</button>
-            <button class="btn btn-emerald btn-sm" title="Render Nhanh Remotion" onclick="vgRenderOnlyById('${item.id}')">⚡ Render</button>
-            ${hasOutput ? `<button class="btn btn-secondary btn-sm" title="Đẩy sang Remake" onclick="vgSendToRemake('${item.id}')">Remake</button>` : ''}
+            ${item.outputType !== 'image' ? `<button class="btn btn-emerald btn-sm" title="Render Nhanh Remotion" onclick="vgRenderOnlyById('${item.id}')">⚡ Render</button>` : ''}
+            ${hasVideoOutput ? `<button class="btn btn-secondary btn-sm" title="Đẩy sang Remake" onclick="vgSendToRemake('${item.id}')">Remake</button>` : ''}
             <button class="btn btn-secondary btn-sm" style="color:#f87171;" onclick="deleteQueueItem('${item.id}')">🗑️</button>
           </div>
         </td>
@@ -1785,26 +2005,33 @@ function renderUnifiedLibrary() {
     return;
   }
 
-  grid.innerHTML = filtered.map(v => `
+  grid.innerHTML = filtered.map(v => {
+    const isImg = v.mediaType === 'image' || /\.(png|jpe?g|webp)$/i.test(v.videoUrl || '');
+    const safeTitle = escapeHtml(v.title || '').replace(/'/g, '&#39;');
+    return `
     <div class="video-card">
       <div class="video-player-wrap">
-        <video controls preload="metadata" src="${escapeHtml(v.videoUrl)}"></video>
+        ${isImg
+          ? `<img src="${escapeHtml(v.imageUrl || v.videoUrl)}" alt="${escapeHtml(v.title)}" style="width:100%;height:260px;object-fit:contain;background:#0f172a;border-radius:8px;" />`
+          : `<video controls preload="metadata" src="${escapeHtml(v.videoUrl)}"></video>`}
       </div>
       <div class="video-info-box">
         <div class="video-title">${escapeHtml(v.title)}</div>
         <div class="video-meta">
-          <span class="badge badge-accent">${escapeHtml(v.source.toUpperCase())} • ${escapeHtml(v.style || '')}</span>
-          <span>${escapeHtml(v.aspectRatio || '9:16')}</span>
+          <span class="badge badge-accent">${escapeHtml(v.subtitle || v.source.toUpperCase())}</span>
         </div>
         <div class="video-card-actions">
-          <a class="btn btn-secondary" href="${escapeHtml(v.videoUrl)}" download style="text-decoration:none;">⬇️ Tải MP4</a>
-          ${v.source !== 'douyin'
+          <a class="btn btn-secondary" href="${escapeHtml(v.videoUrl)}" download style="text-decoration:none;">${isImg ? '⬇️ Tải Ảnh PNG' : '⬇️ Tải MP4'}</a>
+          ${isImg
+            ? `<button class="btn btn-primary" onclick="switchTab('tab-video-gen'); vgAnimateGeneratedImage('${escapeHtml(v.imageUrl || v.videoUrl)}', '${safeTitle}')">🎬 Tạo Video</button>`
+            : v.source !== 'douyin'
             ? `<button class="btn btn-secondary" onclick="vgSendToRemake('${v.id}')">⚡ Remake</button>`
             : `<button class="btn btn-secondary" onclick="switchToRemake('${v.id}')">⚡ Remake</button>`}
         </div>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // ============================================================================

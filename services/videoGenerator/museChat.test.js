@@ -112,5 +112,9 @@ test('buildMuseSceneVideoPrompt formats distinct prompts for image_to_video, tex
 
   const stitch = buildMuseSceneVideoPrompt(scene, { generationMode: 'image_stitch', title: 'KỶ LUẬT TỰ GIÁC' });
   assert.match(stitch, /illustration image right now/i);
+
+  const t2i = buildMuseSceneVideoPrompt(scene, { generationMode: 'text_to_image', title: 'KỶ LUẬT TỰ GIÁC' });
+  assert.match(t2i, /do NOT generate a video/i);
+  assert.match(t2i, /image generation tool immediately/i);
 });
 

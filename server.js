@@ -70,6 +70,7 @@ const {
 const {
   VALID_GENERATION_MODES,
   resolveGenerationMode,
+  isShortKeywordInput,
   enforceSceneGoalAlignment,
   validateSceneGoalAlignment,
   planScenes,
@@ -1085,38 +1086,105 @@ app.get('/api/video-gen/presets', (req, res) => {
   res.json({
     success: true,
     presets: listStylePresets(),
+    aiEngines: [
+      { id: 'muse_only', name: '🟣 Muse.ai (camhien2000qt@gmail.com · Chạy ẩn 9222)' },
+      { id: 'gemini_only', name: '🔵 Gemini Ultra (dophukhuong1234@gmail.com · Chạy ẩn 9223)' },
+      { id: 'muse_first', name: '⚡ Tự động: Muse.ai (#1) ➔ dự phòng Gemini Ultra (#2)', recommended: true },
+      { id: 'gemini_first', name: '🔄 Tự động: Gemini Ultra (#1) ➔ dự phòng Muse.ai (#2)' },
+      { id: 'remotion_only', name: '🎞️ Chỉ dùng Đồ họa Nội bộ (Không gọi AI ngoài)' },
+    ],
     generationModes: [
       {
+        id: 'text_to_image',
+        name: '🖼️ Tạo Ảnh AI từ Keyword (Keyword ➔ Ảnh PNG chuẩn Style)',
+      },
+      {
         id: 'image_to_video',
-        name: '🎬 Image-to-Video (Tạo Keyframe chuẩn mục tiêu ➔ Biến thành Video chuyển động)',
+        name: '🎬 Tạo Video: Image-to-Video (Tạo Ảnh gốc ➔ Biến thành Video MP4)',
         recommended: true,
       },
       {
         id: 'text_to_video',
-        name: '🎥 Text-to-Video (Tạo trực tiếp Video clip từ kịch bản chuẩn mục tiêu)',
+        name: '🎥 Tạo Video: Text-to-Video (Tạo trực tiếp Video MP4 từ Keyword)',
       },
       {
         id: 'video_to_video',
-        name: '🔄 Video-to-Video (Biến đổi / Đồng bộ chuyển động từ Video tham chiếu)',
+        name: '🔄 Tạo Video: Video-to-Video (Biến đổi từ Video mẫu + Keyword)',
       },
       {
         id: 'image_stitch',
-        name: '🖼️ Image Stitch (Tạo ảnh minh họa 2D + Ghép chuyển động Remotion nhanh)',
+        name: '⚡ Ảnh AI + Ghép Video Nhanh (Tạo ảnh AI + Chuyển động mượt & Giọng đọc)',
       },
     ],
   });
 });
 
 /**
- * Helper: Tự động chia kịch bản thành các scene song ngữ Việt - Anh ngay lập tức
- * khi không mở Chrome Gemini Ultra (giúp test & render Remotion tức thì).
+ * Tạo trực tiếp 1 Scene giàu chi tiết từ Keyword để gửi thẳng sang Muse.ai / Gemini Ultra
+ * khi người dùng chọn chế độ "Trực tiếp từ Keyword (1 Ảnh / 1 Clip Video)".
+ */
+function buildDirectKeywordScene(keywordOrText, kind, layoutMode, extraOpts = {}) {
+  const cleanKw = String(keywordOrText || '').trim();
+  const preset = getStylePreset(kind);
+  const resolvedLayout = layoutMode || preset.defaultLayout || 'fullscreen';
+  const generationMode = resolveGenerationMode(extraOpts.generationMode, 'image_to_video');
+  const aspectRatio = extraOpts.aspectRatio || preset.defaultAspectRatio || '9:16';
+
+  const aligned = enforceSceneGoalAlignment(
+    {
+      id: 1,
+      text: cleanKw,
+      textEn: '',
+      visualMode: kind === 'pictogram' ? 'pictogram' : 'standard',
+      generationMode,
+      imagePrompt: `Masterpiece full-screen single-layer illustration of "${cleanKw}", expressive subject, clear focal point, rich storytelling details — ${preset.characterStyleBlock}`,
+      videoPrompt: `Masterpiece full-screen single-layer animated scene of "${cleanKw}", natural expressive motion, smooth cinematic camera movement, coherent action from start to finish — ${preset.characterStyleBlock}`,
+      durationSec: Number(extraOpts.durationSec) || 6,
+      keyframePath: extraOpts.keyframePath || '',
+      sourceVideoPath: extraOpts.sourceVideoPath || '',
+    },
+    {
+      kind,
+      generationMode,
+      title: extraOpts.title || cleanKw.slice(0, 80),
+      filmRules: extraOpts.filmRules || '',
+      aspectRatio,
+    }
+  );
+
+  return normalizeScenes([aligned], {
+    layoutMode: resolvedLayout,
+    generationMode,
+    keyframePath: extraOpts.keyframePath || '',
+    sourceVideoPath: extraOpts.sourceVideoPath || '',
+  });
+}
+
+/**
+ * Helper: Tự động chia kịch bản (hoặc mở rộng Keyword ngắn) thành các scene
+ * khi dùng chế độ cục bộ hoặc dự phòng.
  */
 function buildInstantLocalScenes(rawScript, kind, layoutMode, extraOpts = {}) {
-  const sentences = String(rawScript || '')
+  const trimmed = String(rawScript || '').trim();
+  if (extraOpts.sceneCount === 1 || extraOpts.outputScale === 'direct_clip') {
+    return buildDirectKeywordScene(trimmed, kind, layoutMode, extraOpts);
+  }
+
+  let chunks = trimmed
     .split(/(?<=[.!?。\n])\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const chunks = sentences.length > 0 ? sentences.slice(0, 8) : [rawScript.trim()];
+
+  if (chunks.length <= 1 && isShortKeywordInput(trimmed)) {
+    chunks = [
+      `Khám phá chủ đề thú vị: ${trimmed}.`,
+      `Góc nhìn trực quan và bản chất cốt lõi đằng sau ${trimmed}.`,
+      `Bài học thực tế giúp bạn ứng dụng hiểu biết về ${trimmed} ngay hôm nay.`,
+    ];
+  } else {
+    chunks = chunks.length > 0 ? chunks.slice(0, 8) : [trimmed];
+  }
+
   const preset = getStylePreset(kind);
   const resolvedLayout = layoutMode || preset.defaultLayout || 'fullscreen';
   const generationMode = resolveGenerationMode(extraOpts.generationMode, 'image_to_video');
@@ -1136,14 +1204,14 @@ function buildInstantLocalScenes(rawScript, kind, layoutMode, extraOpts = {}) {
               ? 'pictogram'
               : 'surreal',
           generationMode,
-          imagePrompt: `${line} — ${preset.characterStyleBlock}`,
-          videoPrompt: `${line} — ${preset.characterStyleBlock}`,
+          imagePrompt: `${line} (Topic: ${trimmed}) — ${preset.characterStyleBlock}`,
+          videoPrompt: `${line} (Topic: ${trimmed}) — ${preset.characterStyleBlock}`,
           durationSec: 5,
         },
         {
           kind,
           generationMode,
-          title: extraOpts.title || '',
+          title: extraOpts.title || trimmed.slice(0, 60),
           filmRules: extraOpts.filmRules || '',
           aspectRatio: extraOpts.aspectRatio || '9:16',
         }
@@ -1155,6 +1223,58 @@ function buildInstantLocalScenes(rawScript, kind, layoutMode, extraOpts = {}) {
       sourceVideoPath: extraOpts.sourceVideoPath || '',
     }
   );
+}
+
+/**
+ * Điều phối AI Director theo đúng lựa chọn AI của người dùng:
+ * - muse_only: chỉ gọi Muse.ai (9222)
+ * - gemini_only: chỉ gọi Gemini Ultra (9223)
+ * - muse_first: Muse.ai (#1) -> dự phòng Gemini Ultra (#2)
+ * - gemini_first: Gemini Ultra (#1) -> dự phòng Muse.ai (#2)
+ */
+async function planScenesByEngineChoice(rawInput, kind, market, aiEngine, planOpts = {}) {
+  const runMuseDirector = async () => {
+    const { page } = await connectToMusePage({ autoLaunch: true, headless: true });
+    const musePlan = await planScenesWithMuse(page, rawInput, kind, market, planOpts);
+    return Array.isArray(musePlan) ? { scenes: musePlan } : (musePlan || {});
+  };
+
+  const runGeminiDirector = async () => {
+    const { page } = await connectToGeminiPage(undefined, 2500, true);
+    const gemPlan = await planScenes(page, rawInput, kind, {
+      ...planOpts,
+      market,
+      returnFullPlan: true,
+    });
+    return Array.isArray(gemPlan) ? { scenes: gemPlan } : (gemPlan || {});
+  };
+
+  if (aiEngine === 'remotion_only') return null;
+
+  if (aiEngine === 'muse_only') {
+    return await runMuseDirector();
+  }
+
+  if (aiEngine === 'gemini_only') {
+    return await runGeminiDirector();
+  }
+
+  if (aiEngine === 'gemini_first') {
+    try {
+      return await runGeminiDirector();
+    } catch (gemErr) {
+      console.warn('[Director] Gemini Ultra (#1) lỗi, chuyển sang Muse.ai (#2):', gemErr.message);
+      return await runMuseDirector();
+    }
+  }
+
+  // Mặc định: muse_first (Muse.ai #1 -> Gemini Ultra #2)
+  try {
+    return await runMuseDirector();
+  } catch (museErr) {
+    console.warn('[Director] Muse.ai (#1) lỗi, chuyển sang Gemini Ultra (#2):', museErr.message);
+    return await runGeminiDirector();
+  }
 }
 
 // 22b. Nghe thử giọng đọc AI (TTS Studio Preview)
@@ -1184,13 +1304,13 @@ app.post('/api/video-gen/tts-preview', async (req, res) => {
   }
 });
 
-// 23. Tạo project mới + chia scene (Gemini Ultra chat hoặc Instant Local Fallback)
+// 23. Tạo project mới + chia scene theo lựa chọn AI (Muse.ai / Gemini Ultra / Tự động)
 app.post(
   '/api/video-gen/plan',
   withGenerationLock(async (req, res) => {
     try {
       const {
-        kind = 'psych_split',
+        kind = 'handdrawn',
         aspectRatio = '9:16',
         layoutMode = null,
         channelName = 'LÀNH TÂM',
@@ -1201,6 +1321,7 @@ app.post(
         continuityOffset = 0.3,
         refs = [],
         rawScript,
+        keyword,
         lessonText,
         title,
         voice = 'vi-VN-NamMinhNeural',
@@ -1209,11 +1330,15 @@ app.post(
         aiEngine = 'muse_first',
         mediaMode = 'muse',
         generationMode = 'image_to_video',
+        outputScale = 'full_story',
+        withVoiceover = true,
+        keyframePath = '',
         sourceVideoPath = '',
       } = req.body;
 
-      if (!rawScript || !rawScript.trim()) {
-        return res.status(400).json({ error: 'Vui lòng nhập kịch bản' });
+      const inputContent = String(rawScript || keyword || '').trim();
+      if (!inputContent) {
+        return res.status(400).json({ error: 'Vui lòng nhập Keyword hoặc kịch bản' });
       }
       try {
         getDimensions(aspectRatio);
@@ -1222,6 +1347,13 @@ app.post(
       }
 
       const resolvedGenMode = resolveGenerationMode(generationMode, 'image_to_video');
+      const resolvedScale = outputScale === 'direct_clip' ? 'direct_clip' : 'full_story';
+      const resolvedWithVoiceover =
+        resolvedGenMode === 'text_to_image'
+          ? false
+          : typeof withVoiceover === 'boolean'
+          ? withVoiceover
+          : resolvedScale !== 'direct_clip';
 
       const project = videoGenStore.createProject({
         kind,
@@ -1231,6 +1363,8 @@ app.post(
         aiEngine,
         mediaMode,
         generationMode: resolvedGenMode,
+        outputScale: resolvedScale,
+        withVoiceover: resolvedWithVoiceover,
         sourceVideoPath,
         aspectRatio,
         layoutMode,
@@ -1241,7 +1375,7 @@ app.post(
         predecessorId,
         continuityOffset,
         refs,
-        rawScript,
+        rawScript: inputContent,
         lessonText: lessonText || '',
         title: title || '',
       });
@@ -1251,73 +1385,81 @@ app.post(
         : { filmRules: '', sceneRules: [], filmAssets: [], resolvedRefs: refs };
 
       let scenes = null;
-      if (aiEngine !== 'remotion_only') {
-        if (aiEngine === 'gemini_first') {
-          try {
-            const { page } = await connectToGeminiPage(undefined, 2500, true);
-            scenes = await planScenes(page, rawScript, kind, {
-              layoutMode: project.layoutMode,
-              targetDuration: project.targetDuration,
-              generationMode: resolvedGenMode,
-              filmRules: filmCtx.filmRules,
-              sceneRules: filmCtx.sceneRules,
-              filmAssets: filmCtx.filmAssets,
-            });
-          } catch (_gemErr) {
-            try {
-              const { page } = await connectToMusePage({ autoLaunch: true, headless: true });
-              const musePlan = await planScenesWithMuse(page, rawScript, kind, market);
-              scenes = Array.isArray(musePlan) ? musePlan : musePlan?.scenes;
-            } catch (_museErr) {}
-          }
-        } else {
-          // Mặc định: Ưu tiên số 1 là Muse.ai (Headless camhien2000qt@gmail.com) -> Dự phòng số 2 là Gemini Ultra
-          try {
-            const { page } = await connectToMusePage({ autoLaunch: true, headless: true });
-            const musePlan = await planScenesWithMuse(page, rawScript, kind, market);
-            scenes = Array.isArray(musePlan) ? musePlan : musePlan?.scenes;
-          } catch (musePlanErr) {
-            console.warn('[Director] Muse.ai chưa trả về JSON scene, chuyển sang Gemini Ultra (#2):', musePlanErr.message);
-            if (aiEngine !== 'muse_only') {
-              try {
-                const { page } = await connectToGeminiPage(undefined, 2500, true);
-                scenes = await planScenes(page, rawScript, kind, {
-                  layoutMode: project.layoutMode,
-                  targetDuration: project.targetDuration,
-                  generationMode: resolvedGenMode,
-                  filmRules: filmCtx.filmRules,
-                  sceneRules: filmCtx.sceneRules,
-                  filmAssets: filmCtx.filmAssets,
-                });
-              } catch (cdpErr) {
-                console.warn('[Director] Gemini Ultra chưa sẵn sàng, dùng bộ chia scene thông minh cục bộ:', cdpErr.message);
-              }
-            }
+      let autoTitle = project.title;
+      let autoLesson = project.lessonText;
+      let autoYoutubeMeta = project.youtubeMeta;
+
+      // Nếu người dùng chọn "1 Ảnh / 1 Clip Trực Tiếp từ Keyword" và không cần viết lời bình AI, tạo thẳng 1 Scene tốc độ cao
+      if (resolvedScale === 'direct_clip' && !resolvedWithVoiceover) {
+        scenes = buildDirectKeywordScene(inputContent, kind, project.layoutMode, {
+          generationMode: resolvedGenMode,
+          title: autoTitle || inputContent.slice(0, 72),
+          filmRules: filmCtx.filmRules,
+          aspectRatio: project.aspectRatio,
+          keyframePath,
+          sourceVideoPath,
+        });
+        if (!autoTitle) autoTitle = inputContent.slice(0, 72);
+      } else if (aiEngine !== 'remotion_only') {
+        try {
+          const planRes = await planScenesByEngineChoice(inputContent, kind, market, aiEngine, {
+            layoutMode: project.layoutMode,
+            targetDuration: project.targetDuration,
+            sceneCount: resolvedScale === 'direct_clip' ? 1 : undefined,
+            generationMode: resolvedGenMode,
+            filmRules: filmCtx.filmRules,
+            sceneRules: filmCtx.sceneRules,
+            filmAssets: filmCtx.filmAssets,
+            sourceVideoPath,
+          });
+          scenes = planRes?.scenes || null;
+          if (!autoTitle && planRes?.title) autoTitle = planRes.title;
+          if (!autoLesson && planRes?.lessonText) autoLesson = planRes.lessonText;
+          if (!autoYoutubeMeta && planRes?.youtubeMeta) autoYoutubeMeta = planRes.youtubeMeta;
+        } catch (planErr) {
+          if (aiEngine === 'muse_only' || aiEngine === 'gemini_only') {
+            console.warn(`[Director · ${aiEngine}] Không nhận được JSON từ AI, chuyển sang dựng prompt trực tiếp từ Keyword:`, planErr.message);
+          } else {
+            console.warn('[Director] Dùng bộ dựng scene thông minh từ Keyword:', planErr.message);
           }
         }
       }
+
       if (!Array.isArray(scenes) || scenes.length === 0) {
-        scenes = buildInstantLocalScenes(rawScript, kind, project.layoutMode, {
+        scenes = buildInstantLocalScenes(inputContent, kind, project.layoutMode, {
           generationMode: resolvedGenMode,
-          title: project.title,
+          outputScale: resolvedScale,
+          sceneCount: resolvedScale === 'direct_clip' ? 1 : undefined,
+          title: autoTitle || inputContent.slice(0, 72),
           filmRules: filmCtx.filmRules,
           aspectRatio: project.aspectRatio,
+          keyframePath,
           sourceVideoPath,
         });
+        if (!autoTitle) autoTitle = inputContent.slice(0, 72);
       } else {
-        scenes = scenes.map((s) =>
-          enforceSceneGoalAlignment(s, {
-            kind,
-            generationMode: s.generationMode || resolvedGenMode,
-            title: project.title,
-            filmRules: filmCtx.filmRules,
-            aspectRatio: project.aspectRatio,
-          })
+        scenes = scenes.map((s, idx) =>
+          enforceSceneGoalAlignment(
+            {
+              ...s,
+              keyframePath: idx === 0 && keyframePath ? keyframePath : (s.keyframePath || ''),
+            },
+            {
+              kind,
+              generationMode: s.generationMode || resolvedGenMode,
+              title: autoTitle || inputContent.slice(0, 72),
+              filmRules: filmCtx.filmRules,
+              aspectRatio: project.aspectRatio,
+            }
+          )
         );
       }
 
       const updated = videoGenStore.updateProject(project.id, {
         status: 'planned',
+        title: autoTitle,
+        lessonText: autoLesson,
+        youtubeMeta: autoYoutubeMeta,
         scenes,
         refs: filmCtx.resolvedRefs,
       });
@@ -1425,7 +1567,7 @@ app.post('/api/video-gen/batches', (req, res) => {
   }
 });
 
-// 24. Sinh media + audio cho toàn bộ scene rồi render
+// 24. Sinh media + audio cho toàn bộ scene rồi render (hoặc xuất thẳng Ảnh PNG / Clip MP4 gốc theo lựa chọn người dùng)
 async function executeProjectGeneration(id, options = {}) {
   const { renderOnly = false } = options;
   const project = videoGenStore.getProject(id);
@@ -1464,21 +1606,36 @@ async function executeProjectGeneration(id, options = {}) {
     options.generationMode || project.generationMode,
     'image_to_video'
   );
+  const outputScale = options.outputScale || project.outputScale || 'full_story';
+  const withVoiceover =
+    activeGenMode === 'text_to_image'
+      ? false
+      : typeof options.withVoiceover === 'boolean'
+      ? options.withVoiceover
+      : typeof project.withVoiceover === 'boolean'
+      ? project.withVoiceover
+      : outputScale !== 'direct_clip';
 
   if (!renderOnly) {
     videoGenStore.updateProject(id, {
       status: 'generating_media',
       generationMode: activeGenMode,
+      outputType: activeGenMode === 'text_to_image' ? 'image' : 'video',
+      outputScale,
+      withVoiceover,
     });
     const aiEngine = options.aiEngine || project.aiEngine || 'muse_first';
     const museUrl = options.museUrl || DEFAULT_MUSE_URL;
 
     const isSceneMediaReady = (s) => {
       if (!s.mediaFile) return false;
+      if (activeGenMode === 'text_to_image') {
+        return s.mediaStatus === 'image';
+      }
       if (activeGenMode === 'image_stitch') {
         return s.mediaStatus === 'video' || s.mediaStatus === 'image';
       }
-      return s.mediaStatus === 'video';
+      return s.mediaStatus === 'video' || (activeGenMode === 'image_to_video' && s.mediaStatus === 'image');
     };
 
     const runMusePass = async () => {
@@ -1493,9 +1650,11 @@ async function executeProjectGeneration(id, options = {}) {
             aspectRatio: project.aspectRatio,
             filmRules: filmCtx.filmRules || '',
             generationMode: options.generationMode || scene.generationMode || activeGenMode,
+            keyframePath: options.keyframePath || scene.keyframePath || '',
             refs: filmCtx.resolvedRefs,
             sourceVideoPath: options.sourceVideoPath || scene.sourceVideoPath || continuityVideoPath || '',
             continuityVideoPath: continuityVideoPath || '',
+            allowKeyframeFallback: outputScale !== 'direct_clip',
           });
           scene.mediaStatus = result.mediaStatus;
           scene.generationMode = result.generationMode || activeGenMode;
@@ -1523,9 +1682,11 @@ async function executeProjectGeneration(id, options = {}) {
             aspectRatio: project.aspectRatio,
             filmRules: filmCtx.filmRules || '',
             generationMode: options.generationMode || scene.generationMode || activeGenMode,
+            keyframePath: options.keyframePath || scene.keyframePath || '',
             refs: filmCtx.resolvedRefs,
             sourceVideoPath: options.sourceVideoPath || scene.sourceVideoPath || continuityVideoPath || '',
             continuityVideoPath: continuityVideoPath || '',
+            allowKeyframeFallback: outputScale !== 'direct_clip',
           });
           scene.mediaStatus = result.mediaStatus;
           scene.generationMode = result.generationMode || activeGenMode;
@@ -1543,14 +1704,33 @@ async function executeProjectGeneration(id, options = {}) {
     };
 
     try {
-      if (aiEngine === 'gemini_first') {
+      if (aiEngine === 'muse_only') {
+        await runMusePass();
+        const failedScene = project.scenes.find((s) => !isSceneMediaReady(s));
+        if (failedScene) {
+          throw new Error(failedScene.error || 'Muse.ai chưa tạo được kết quả cho phân cảnh.');
+        }
+      } else if (aiEngine === 'gemini_only') {
+        await runGeminiPass();
+        const failedScene = project.scenes.find((s) => !isSceneMediaReady(s));
+        if (failedScene) {
+          throw new Error(failedScene.error || 'Gemini Ultra chưa tạo được kết quả cho phân cảnh.');
+        }
+      } else if (aiEngine === 'gemini_first') {
+        let gemError = null;
         try {
           await runGeminiPass();
         } catch (gemErr) {
+          gemError = gemErr;
           console.warn('[Generate] Gemini Ultra (#1) gặp lỗi, chuyển sang Muse.ai (#2):', gemErr.message);
         }
         if (project.scenes.some((s) => !isSceneMediaReady(s))) {
-          await runMusePass();
+          try {
+            await runMusePass();
+          } catch (museErr) {
+            if (gemError) throw new Error(`Gemini Ultra (#1): ${gemError.message} | Muse.ai (#2): ${museErr.message}`);
+            throw museErr;
+          }
         }
       } else {
         // Mặc định: Ưu tiên số 1 là Muse.ai -> Dự phòng số 2 là Gemini Ultra
@@ -1561,23 +1741,60 @@ async function executeProjectGeneration(id, options = {}) {
           museError = err;
           console.warn('[Generate] Muse.ai (Ưu tiên #1) gặp lỗi, tự động chuyển sang Gemini Ultra (Dự phòng #2):', err.message);
         }
-        if (aiEngine !== 'muse_only' && project.scenes.some((s) => !isSceneMediaReady(s))) {
+        if (project.scenes.some((s) => !isSceneMediaReady(s))) {
           try {
             await runGeminiPass();
           } catch (gemErr) {
             if (museError) throw new Error(`Muse.ai (#1): ${museError.message} | Gemini Ultra (#2): ${gemErr.message}`);
             throw gemErr;
           }
-        } else if (museError && aiEngine === 'muse_only') {
-          throw museError;
         }
       }
     } catch (cdpErr) {
-      if (!options.allowFallbackRender) {
+      if (!options.allowFallbackRender || activeGenMode === 'text_to_image') {
         videoGenStore.updateProject(id, { status: 'media_failed', error: cdpErr.message });
         throw cdpErr;
       }
       console.warn('[Generate] Muse.ai & Gemini Ultra chưa sẵn sàng, tiếp tục TTS + Remotion Render:', cdpErr.message);
+    }
+  }
+
+  // Trường hợp 1: Người dùng chọn "Tạo Ảnh AI từ Keyword" (text_to_image) -> trả thẳng danh sách ảnh PNG vừa tạo, KHÔNG ghép MP4
+  if (activeGenMode === 'text_to_image') {
+    const outputImages = project.scenes
+      .filter((s) => s.mediaFile)
+      .map((s) => (s.mediaFile.startsWith('/') ? s.mediaFile : `/${s.mediaFile}`));
+    if (outputImages.length === 0) {
+      const errMsg = project.scenes.find((s) => s.error)?.error || 'Chưa tạo được ảnh AI từ Keyword.';
+      videoGenStore.updateProject(id, { status: 'failed', error: errMsg });
+      throw new Error(errMsg);
+    }
+    return videoGenStore.updateProject(id, {
+      status: 'done',
+      outputType: 'image',
+      outputImages,
+      outputPath: null,
+      error: null,
+    });
+  }
+
+  // Trường hợp 2: Người dùng chọn "1 Clip Video Trực Tiếp từ Keyword" & KHÔNG chèn giọng đọc/phụ đề -> xuất nguyên bản file MP4 gốc từ Muse.ai / Gemini Ultra
+  if (outputScale === 'direct_clip' && !withVoiceover && project.scenes.length === 1) {
+    const firstScene = project.scenes[0];
+    if (firstScene && firstScene.mediaFile && /\.mp4$/i.test(firstScene.mediaFile)) {
+      const rawMp4Path = path.join(MEDIA_DIR, path.basename(firstScene.mediaFile));
+      if (fs.existsSync(rawMp4Path)) {
+        const outDir = path.join(__dirname, 'storage', 'video-gen', id);
+        fs.mkdirSync(outDir, { recursive: true });
+        const outMp4 = path.join(outDir, 'output.mp4');
+        fs.copyFileSync(rawMp4Path, outMp4);
+        return videoGenStore.updateProject(id, {
+          status: 'done',
+          outputType: 'video',
+          outputPath: outMp4,
+          error: null,
+        });
+      }
     }
   }
 
@@ -1633,8 +1850,199 @@ async function executeProjectGeneration(id, options = {}) {
   videoGenStore.updateProject(id, { status: 'rendering' });
   const outputPath = renderProject(videoGenStore.getProject(id));
 
-  return videoGenStore.updateProject(id, { status: 'done', outputPath, error: null });
+  return videoGenStore.updateProject(id, {
+    status: 'done',
+    outputType: 'video',
+    outputPath,
+    error: null,
+  });
 }
+
+// 24a. 1-Click Tạo Ảnh hoặc Video trực tiếp từ Keyword theo đúng lựa chọn AI (Muse.ai / Gemini Ultra / Tự động)
+app.post(
+  '/api/video-gen/keyword-create',
+  withGenerationLock(async (req, res) => {
+    let createdProjectId = null;
+    try {
+      const {
+        keyword,
+        rawScript,
+        aiEngine = 'muse_first',
+        mediaMode = 'muse',
+        generationMode = 'image_to_video',
+        outputScale = 'direct_clip',
+        withVoiceover,
+        kind = 'handdrawn',
+        aspectRatio = '9:16',
+        layoutMode = 'fullscreen',
+        targetDuration = 30,
+        channelName = 'LÀNH TÂM',
+        title = '',
+        lessonText = '',
+        voice = 'vi-VN-NamMinhNeural',
+        voiceRate = '+20%',
+        market = 'VI',
+        projectId = null,
+        refs = [],
+        keyframePath = '',
+        sourceVideoPath = '',
+      } = req.body || {};
+
+      const inputContent = String(keyword || rawScript || '').trim();
+      if (!inputContent) {
+        return res.status(400).json({ error: 'Vui lòng nhập Keyword (từ khóa) hoặc ý tưởng!' });
+      }
+      try {
+        getDimensions(aspectRatio);
+      } catch (dimErr) {
+        return res.status(400).json({ error: dimErr.message });
+      }
+
+      const resolvedGenMode = resolveGenerationMode(generationMode, 'image_to_video');
+      const resolvedScale = outputScale === 'full_story' ? 'full_story' : 'direct_clip';
+      const resolvedWithVoiceover =
+        resolvedGenMode === 'text_to_image'
+          ? false
+          : typeof withVoiceover === 'boolean'
+          ? withVoiceover
+          : resolvedScale === 'full_story';
+
+      // Chuẩn hóa keyframePath nếu gửi dạng URL "/media/xxx.png"
+      let diskKeyframePath = String(keyframePath || '').trim();
+      if (diskKeyframePath.startsWith('/media/')) {
+        diskKeyframePath = path.join(MEDIA_DIR, path.basename(diskKeyframePath));
+      } else if (diskKeyframePath.startsWith('media/')) {
+        diskKeyframePath = path.join(MEDIA_DIR, path.basename(diskKeyframePath));
+      }
+
+      const project = videoGenStore.createProject({
+        kind,
+        market,
+        voice,
+        voiceRate,
+        aiEngine,
+        mediaMode,
+        generationMode: resolvedGenMode,
+        outputScale: resolvedScale,
+        withVoiceover: resolvedWithVoiceover,
+        sourceVideoPath,
+        aspectRatio,
+        layoutMode,
+        channelName,
+        targetDuration,
+        projectId,
+        refs,
+        rawScript: inputContent,
+        lessonText: lessonText || '',
+        title: title || '',
+      });
+      createdProjectId = project.id;
+
+      const filmCtx = projectId
+        ? filmStore.resolveSceneContext(projectId, 1, refs, null)
+        : { filmRules: '', sceneRules: [], filmAssets: [], resolvedRefs: refs };
+
+      let scenes = null;
+      let autoTitle = project.title;
+      let autoLesson = project.lessonText;
+      let autoYoutubeMeta = null;
+
+      if (resolvedScale === 'direct_clip' && !resolvedWithVoiceover) {
+        scenes = buildDirectKeywordScene(inputContent, kind, project.layoutMode, {
+          generationMode: resolvedGenMode,
+          title: autoTitle || inputContent.slice(0, 72),
+          filmRules: filmCtx.filmRules,
+          aspectRatio: project.aspectRatio,
+          keyframePath: diskKeyframePath,
+          sourceVideoPath,
+        });
+        if (!autoTitle) autoTitle = inputContent.slice(0, 72);
+      } else if (aiEngine !== 'remotion_only') {
+        try {
+          const planRes = await planScenesByEngineChoice(inputContent, kind, market, aiEngine, {
+            layoutMode: project.layoutMode,
+            targetDuration: project.targetDuration,
+            sceneCount: resolvedScale === 'direct_clip' ? 1 : undefined,
+            generationMode: resolvedGenMode,
+            filmRules: filmCtx.filmRules,
+            sceneRules: filmCtx.sceneRules,
+            filmAssets: filmCtx.filmAssets,
+            sourceVideoPath,
+          });
+          scenes = planRes?.scenes || null;
+          if (!autoTitle && planRes?.title) autoTitle = planRes.title;
+          if (!autoLesson && planRes?.lessonText) autoLesson = planRes.lessonText;
+          if (planRes?.youtubeMeta) autoYoutubeMeta = planRes.youtubeMeta;
+        } catch (planErr) {
+          console.warn(`[KeywordCreate · ${aiEngine}] Dự phòng dựng prompt trực tiếp từ Keyword:`, planErr.message);
+        }
+      }
+
+      if (!Array.isArray(scenes) || scenes.length === 0) {
+        scenes = buildInstantLocalScenes(inputContent, kind, project.layoutMode, {
+          generationMode: resolvedGenMode,
+          outputScale: resolvedScale,
+          sceneCount: resolvedScale === 'direct_clip' ? 1 : undefined,
+          title: autoTitle || inputContent.slice(0, 72),
+          filmRules: filmCtx.filmRules,
+          aspectRatio: project.aspectRatio,
+          keyframePath: diskKeyframePath,
+          sourceVideoPath,
+        });
+        if (!autoTitle) autoTitle = inputContent.slice(0, 72);
+      } else {
+        scenes = scenes.map((s, idx) =>
+          enforceSceneGoalAlignment(
+            {
+              ...s,
+              keyframePath: idx === 0 && diskKeyframePath ? diskKeyframePath : (s.keyframePath || ''),
+            },
+            {
+              kind,
+              generationMode: s.generationMode || resolvedGenMode,
+              title: autoTitle || inputContent.slice(0, 72),
+              filmRules: filmCtx.filmRules,
+              aspectRatio: project.aspectRatio,
+            }
+          )
+        );
+      }
+
+      videoGenStore.updateProject(project.id, {
+        status: 'planned',
+        title: autoTitle,
+        lessonText: autoLesson,
+        youtubeMeta: autoYoutubeMeta,
+        scenes,
+        refs: filmCtx.resolvedRefs,
+      });
+
+      const updated = await executeProjectGeneration(project.id, {
+        renderOnly: aiEngine === 'remotion_only',
+        allowFallbackRender: aiEngine === 'remotion_only',
+        aiEngine,
+        mediaMode,
+        generationMode: resolvedGenMode,
+        outputScale: resolvedScale,
+        withVoiceover: resolvedWithVoiceover,
+        keyframePath: diskKeyframePath,
+        sourceVideoPath,
+        voice,
+        voiceRate,
+      });
+
+      res.json({ success: true, data: updated });
+    } catch (err) {
+      console.error('Lỗi keyword-create:', err);
+      if (createdProjectId) {
+        try {
+          videoGenStore.updateProject(createdProjectId, { status: 'failed', error: err.message });
+        } catch (_ignore) {}
+      }
+      res.status(500).json({ error: err.message });
+    }
+  })
+);
 
 app.post(
   '/api/video-gen/:id/generate',
@@ -1643,9 +2051,12 @@ app.post(
       const updated = await executeProjectGeneration(req.params.id, {
         renderOnly: Boolean(req.body && req.body.renderOnly),
         allowFallbackRender: Boolean(req.body && req.body.allowFallbackRender),
-        aiEngine: req.body?.aiEngine || 'muse_first',
-        mediaMode: req.body?.mediaMode || 'muse',
+        aiEngine: req.body?.aiEngine || undefined,
+        mediaMode: req.body?.mediaMode || undefined,
         generationMode: req.body?.generationMode,
+        outputScale: req.body?.outputScale,
+        withVoiceover: req.body?.withVoiceover,
+        keyframePath: req.body?.keyframePath,
         sourceVideoPath: req.body?.sourceVideoPath,
         voice: req.body?.voice,
         voiceRate: req.body?.voiceRate,
@@ -1729,7 +2140,7 @@ app.post('/api/video-gen/queue/stop', (req, res) => {
   res.json({ success: true, running: false });
 });
 
-// 25. Sinh lại media cho 1 scene bị lỗi (Ưu tiên #1: Muse.ai -> Dự phòng #2: Gemini Ultra)
+// 25. Sinh lại media cho 1 scene theo đúng AI người dùng chọn (Muse.ai / Gemini Ultra / Tự động)
 app.post(
   '/api/video-gen/:id/retry-scene/:sceneId',
   withGenerationLock(async (req, res) => {
@@ -1748,60 +2159,52 @@ app.post(
       const sourceVideoPath = req.body?.sourceVideoPath || scene.sourceVideoPath || project.sourceVideoPath || '';
       let result = null;
 
-      if (aiEngine === 'gemini_first') {
+      const callMuse = async () => {
+        const { page } = await connectToMusePage({ museUrl: DEFAULT_MUSE_URL });
+        const r = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR, {
+          projectId: project.id,
+          kind: project.kind,
+          title: project.title,
+          aspectRatio: project.aspectRatio,
+          generationMode,
+          sourceVideoPath,
+          refs: project.refs || [],
+        });
+        scene.provider = 'muse.ai';
+        return r;
+      };
+
+      const callGemini = async () => {
+        const { page } = await connectToGeminiPage();
+        const r = await generateSceneMedia(page, scene, MEDIA_DIR, {
+          projectId: project.id,
+          kind: project.kind,
+          title: project.title,
+          aspectRatio: project.aspectRatio,
+          generationMode,
+          sourceVideoPath,
+          refs: project.refs || [],
+        });
+        scene.provider = 'gemini_ultra';
+        return r;
+      };
+
+      if (aiEngine === 'muse_only') {
+        result = await callMuse();
+      } else if (aiEngine === 'gemini_only') {
+        result = await callGemini();
+      } else if (aiEngine === 'gemini_first') {
         try {
-          const { page } = await connectToGeminiPage();
-          result = await generateSceneMedia(page, scene, MEDIA_DIR, {
-            projectId: project.id,
-            kind: project.kind,
-            title: project.title,
-            aspectRatio: project.aspectRatio,
-            generationMode,
-            sourceVideoPath,
-            refs: project.refs || [],
-          });
-          scene.provider = 'gemini_ultra';
+          result = await callGemini();
         } catch (_gemErr) {
-          const { page } = await connectToMusePage({ museUrl: DEFAULT_MUSE_URL });
-          result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR, {
-            projectId: project.id,
-            kind: project.kind,
-            title: project.title,
-            aspectRatio: project.aspectRatio,
-            generationMode,
-            sourceVideoPath,
-            refs: project.refs || [],
-          });
-          scene.provider = 'muse.ai';
+          result = await callMuse();
         }
       } else {
-        // Mặc định: Ưu tiên số 1 Muse.ai -> Dự phòng số 2 Gemini Ultra
         try {
-          const { page } = await connectToMusePage({ museUrl: DEFAULT_MUSE_URL });
-          result = await generateSceneMediaWithMuse(page, scene, MEDIA_DIR, {
-            projectId: project.id,
-            kind: project.kind,
-            title: project.title,
-            aspectRatio: project.aspectRatio,
-            generationMode,
-            sourceVideoPath,
-            refs: project.refs || [],
-          });
-          scene.provider = 'muse.ai';
+          result = await callMuse();
         } catch (museErr) {
           console.warn(`[RetryScene] Muse.ai (#1) lỗi (${museErr.message}), chuyển sang Gemini Ultra (#2)...`);
-          if (aiEngine === 'muse_only') throw museErr;
-          const { page } = await connectToGeminiPage();
-          result = await generateSceneMedia(page, scene, MEDIA_DIR, {
-            projectId: project.id,
-            kind: project.kind,
-            title: project.title,
-            aspectRatio: project.aspectRatio,
-            generationMode,
-            sourceVideoPath,
-            refs: project.refs || [],
-          });
-          scene.provider = 'gemini_ultra';
+          result = await callGemini();
         }
       }
 
@@ -1811,14 +2214,21 @@ app.post(
       if (result.keyframeFile) scene.keyframeFile = result.keyframeFile;
       scene.error = null;
 
-      const updated = videoGenStore.updateProject(id, { scenes: project.scenes });
+      const outputImages =
+        project.outputType === 'image' || generationMode === 'text_to_image'
+          ? project.scenes
+              .filter((s) => s.mediaFile)
+              .map((s) => (s.mediaFile.startsWith('/') ? s.mediaFile : `/${s.mediaFile}`))
+          : project.outputImages || [];
+
+      const updated = videoGenStore.updateProject(id, { scenes: project.scenes, outputImages });
       res.json({ success: true, data: updated });
     } catch (err) {
       console.error('Lỗi retry scene:', err);
       const rawMsg = String(err.message || err);
       const friendlyMsg =
         rawMsg.includes('ECONNREFUSED') || rawMsg.includes('Timeout') || rawMsg.includes('waitFor')
-          ? 'Đã tự động mở cửa sổ Chrome AI (cổng 9222) với Muse.ai (Ưu tiên #1) và Gemini Ultra (Dự phòng #2). Bạn hãy đăng nhập tài khoản Muse.ai / Gemini trên cửa sổ Chrome vừa bật để tạo video AI!'
+          ? 'Trình duyệt chạy ẩn Muse.ai (9222) hoặc Gemini Ultra (9223) chưa phản hồi. Hãy bấm nút "👻 Chạy Ẩn (Muse #1 + Gemini Ultra #2)" rồi thử lại!'
           : rawMsg;
       res.status(500).json({ error: friendlyMsg });
     }
@@ -1993,23 +2403,35 @@ app.post('/api/video-gen/:id/publish/youtube', async (req, res) => {
 // ============================================================================
 
 app.get('/api/library', (req, res) => {
-  const aiProjects = videoGenStore.listProjects().filter((p) => p.outputPath && fs.existsSync(p.outputPath));
+  const aiProjects = videoGenStore
+    .listProjects()
+    .filter(
+      (p) =>
+        (p.outputPath && fs.existsSync(p.outputPath)) ||
+        (p.outputType === 'image' && Array.isArray(p.outputImages) && p.outputImages.length > 0)
+    );
   const douyinVideos = getDb().videos || [];
 
   const items = [
-    ...aiProjects.map((p) => ({
-      id: p.id,
-      source: p.projectId ? 'film' : 'ai',
-      projectId: p.projectId || null,
-      title: p.title || p.rawScript.slice(0, 70),
-      subtitle: `${p.kind.toUpperCase()} · ${p.aspectRatio} · ${p.layoutMode === 'split' ? 'Khung 3 tầng Lành Tâm' : 'Fullscreen'}`,
-      videoUrl: `/storage/video-gen/${p.id}/output.mp4`,
-      createdAt: p.updatedAt || p.createdAt,
-      postedToTikTok: Boolean(p.publishing?.tiktok?.posted),
-    })),
+    ...aiProjects.map((p) => {
+      const isImg = p.outputType === 'image' && Array.isArray(p.outputImages) && p.outputImages.length > 0;
+      return {
+        id: p.id,
+        source: p.projectId ? 'film' : 'ai',
+        mediaType: isImg ? 'image' : 'video',
+        projectId: p.projectId || null,
+        title: p.title || p.rawScript.slice(0, 70),
+        subtitle: `${isImg ? '🖼️ Ảnh AI' : '🎬 Video AI'} · ${p.kind.toUpperCase()} · ${p.aspectRatio} · ${p.aiEngine || 'muse_first'}`,
+        videoUrl: isImg ? p.outputImages[0] : `/storage/video-gen/${p.id}/output.mp4`,
+        imageUrl: isImg ? p.outputImages[0] : null,
+        createdAt: p.updatedAt || p.createdAt,
+        postedToTikTok: Boolean(p.publishing?.tiktok?.posted),
+      };
+    }),
     ...douyinVideos.map((v) => ({
       id: v.id,
       source: 'douyin',
+      mediaType: 'video',
       projectId: null,
       title: v.title || 'Douyin Video',
       subtitle: `Douyin Reup · ${v.remakeUrl ? 'Đã Remake FFmpeg' : 'Bản gốc'}`,

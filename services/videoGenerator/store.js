@@ -42,6 +42,8 @@ function createStore(dataFile) {
     aiEngine = 'muse_first',
     mediaMode = 'muse',
     generationMode = 'image_to_video',
+    outputScale = 'full_story',
+    withVoiceover = true,
     sourceVideoPath = '',
     youtubeMeta = null,
     meta = {},
@@ -55,6 +57,7 @@ function createStore(dataFile) {
     const resolvedLayout = layoutMode || preset.defaultLayout || 'fullscreen';
     const marketPreset = getMarketPreset(market || 'VI');
     const now = new Date().toISOString();
+    const outputType = generationMode === 'text_to_image' ? 'image' : 'video';
 
     const project = {
       id: `gp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -63,6 +66,9 @@ function createStore(dataFile) {
       aiEngine: aiEngine || 'muse_first',
       mediaMode: mediaMode || 'muse',
       generationMode: generationMode || 'image_to_video',
+      outputType,
+      outputScale: outputScale || 'full_story',
+      withVoiceover: Boolean(withVoiceover),
       sourceVideoPath: sourceVideoPath || '',
       aspectRatio: aspectRatio || preset.defaultAspectRatio || '9:16',
       title: title || '',
@@ -99,6 +105,7 @@ function createStore(dataFile) {
       scenes: scenes || [],
       status,
       outputPath: null,
+      outputImages: [],
       publishing: { tiktok: { posted: false, postedAt: null, url: null } },
       createdAt: now,
       updatedAt: now,

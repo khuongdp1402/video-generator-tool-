@@ -5,6 +5,7 @@ const { sendPromptAndWaitForStableReply } = require('./geminiChat');
 const { chatCompletionJson } = require('./agentgwClient');
 
 const VALID_GENERATION_MODES = [
+  'text_to_image',
   'image_to_video',
   'text_to_video',
   'video_to_video',
@@ -14,6 +15,15 @@ const VALID_GENERATION_MODES = [
 function resolveGenerationMode(mode, fallback = 'image_to_video') {
   const normalized = String(mode || '').trim().toLowerCase();
   return VALID_GENERATION_MODES.includes(normalized) ? normalized : fallback;
+}
+
+function isShortKeywordInput(rawInput, opts = {}) {
+  if (typeof opts.isKeyword === 'boolean') return opts.isKeyword;
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const sentenceBreaks = (trimmed.match(/[.!?。\n]+/g) || []).length;
+  return words.length <= 28 && trimmed.length <= 180 && sentenceBreaks <= 1;
 }
 
 /**
@@ -142,12 +152,17 @@ function buildDirectorPrompt(rawScript, kind, opts = {}) {
 
   const {
     targetDuration = 30,
+    sceneCount = null,
     filmRules = '',
     sceneRules = [],
     filmAssets = [],
   } = options;
 
-  const targetSceneCount = Math.max(2, Math.min(10, Math.round(Number(targetDuration || 30) / 6)));
+  const isKeyword = isShortKeywordInput(script, options);
+  const targetSceneCount =
+    Number.isFinite(Number(sceneCount)) && Number(sceneCount) >= 1
+      ? Math.min(10, Math.round(Number(sceneCount)))
+      : Math.max(2, Math.min(10, Math.round(Number(targetDuration || 30) / 6)));
 
   let extraContext = '';
   if (filmRules && filmRules.trim()) {
@@ -195,22 +210,29 @@ function buildDirectorPrompt(rawScript, kind, opts = {}) {
         `- Gán "visualMode": "mode_a" cho cảnh đời thường/đối thoại (Pictogram đen trắng), hoặc "mode_b" cho cảnh phân tích chiều sâu tâm lý (Surreal Neon xanh tím).\n`
       : '';
 
-  return `Bạn là đạo diễn AI cho video ngắn.
+  const inputBlock = isKeyword
+    ? `TỪ KHÓA / Ý TƯỞNG GỐC (Keyword do người dùng nhập):\n"""\n${script}\n"""\n` +
+      (targetSceneCount === 1
+        ? `Hãy từ TỪ KHÓA trên sáng tạo ĐÚNG 1 scene duy nhất cô đọng, giàu hình ảnh và chuyển động điện ảnh rõ nét nhất bám sát 100% từ khóa.`
+        : `Hãy TỰ SÁNG TẠO kịch bản câu chuyện/giải thích cuốn hút bám sát 100% TỪ KHÓA trên và triển khai thành ${targetSceneCount} scene (3-8 scene) mạch lạc từ Hook mở đầu đến Kết bài.`)
+    : `Kịch bản:\n"""\n${script}\n"""\n` +
+      (targetSceneCount === 1
+        ? `Tóm lược nội dung trên thành ĐÚNG 1 scene duy nhất giàu hình ảnh nhất.`
+        : `Chia kịch bản trên thành khoảng ${targetSceneCount} scene (3-8 scene).`);
+
+  return `Bạn là đạo diễn AI cho hình ảnh & video ngắn chất lượng cao.
 ${preset.directorGuidance}
 ${marketRule}
 ${psychInstruction}
 
-Kịch bản:
-"""
-${script}
-"""
+${inputBlock}
 ${extraContext}
 Style hình ảnh/video áp dụng cho MỌI scene (giữ nguyên các từ khoá này trong mỗi videoPrompt/imagePrompt):
 """
 ${preset.characterStyleBlock}
 """
 
-Chia kịch bản trên thành khoảng ${targetSceneCount} scene (3-8 scene). Trả lời DUY NHẤT một JSON object theo đúng schema sau,
+Trả lời DUY NHẤT một JSON object theo đúng schema sau,
 không thêm bất kỳ text nào khác trước hoặc sau JSON:
 {
   "title": "Tiêu đề video bằng ngôn ngữ của thị trường ${marketPreset.code}",
@@ -227,8 +249,8 @@ không thêm bất kỳ text nào khác trước hoặc sau JSON:
       "textEn": "bilingual English subtitle translation if psych_split",
       "visualMode": "mode_a hoặc mode_b (nếu psych_split)",
       "highlightWords": ["từ1", "từ2"],
-      "imagePrompt": "prompt chi tiết tiếng Anh tạo hình ảnh cho scene này, BẮT BUỘC bao gồm style ở trên",
-      "videoPrompt": "prompt chi tiết tiếng Anh mô tả chuyển động camera/nhân vật để biến ảnh thành video, bao gồm style ở trên",
+      "imagePrompt": "prompt chi tiết tiếng Anh tạo hình ảnh toàn màn hình 1 tầng cho scene này, BẮT BUỘC bao gồm style ở trên",
+      "videoPrompt": "prompt chi tiết tiếng Anh mô tả chuyển động camera/nhân vật để tạo video chuyển động cho scene này, bao gồm style ở trên",
       "durationSec": 6
     }
   ]
@@ -313,17 +335,34 @@ async function planScenes(page, rawScript, kind, opts = {}) {
   const options = typeof opts === 'string' ? { market: opts } : (opts || {});
   if (!page) {
     const res = await planScenesWithAgentGW(rawScript, kind, options.market || 'US', options);
-    return res.scenes;
+    return options.returnFullPlan ? res : res.scenes;
   }
 
   const prompt = buildDirectorPrompt(rawScript, kind, options);
   const preset = getStylePreset(kind);
   const layoutMode = options.layoutMode || preset.defaultLayout || 'fullscreen';
 
+  const formatResult = (parsed) => {
+    const scenes = normalizeScenes(parsed.scenes, {
+      layoutMode,
+      generationMode: options.generationMode,
+      sourceVideoPath: options.sourceVideoPath,
+    });
+    if (options.returnFullPlan) {
+      return {
+        scenes,
+        title: parsed.title || '',
+        lessonText: parsed.lessonText || '',
+        youtubeMeta: parsed.youtubeMeta || null,
+      };
+    }
+    return scenes;
+  };
+
   let reply;
   try {
     reply = await sendPromptAndWaitForStableReply(page, prompt);
-    return normalizeScenes(extractJson(reply).scenes, { layoutMode });
+    return formatResult(extractJson(reply));
   } catch (err) {
     if (!(err instanceof JsonExtractionError)) {
       throw err;
@@ -332,7 +371,7 @@ async function planScenes(page, rawScript, kind, opts = {}) {
       page,
       'Câu trả lời trước không phải JSON hợp lệ. Trả lời lại DUY NHẤT một JSON object hợp lệ theo đúng schema đã yêu cầu, không thêm text nào khác.'
     );
-    return normalizeScenes(extractJson(retryReply).scenes, { layoutMode });
+    return formatResult(extractJson(retryReply));
   }
 }
 
@@ -360,6 +399,7 @@ function normalizeScenes(rawScenes, opts = {}) {
     audioFile: s.audioFile || '',
     mediaFile: s.mediaFile || '',
     keyframeFile: s.keyframeFile || '',
+    keyframePath: s.keyframePath || opts.keyframePath || '',
     sourceVideoPath: s.sourceVideoPath || opts.sourceVideoPath || '',
     mediaStatus: s.mediaStatus || 'pending',
   }));
@@ -368,6 +408,7 @@ function normalizeScenes(rawScenes, opts = {}) {
 module.exports = {
   VALID_GENERATION_MODES,
   resolveGenerationMode,
+  isShortKeywordInput,
   enforceSceneGoalAlignment,
   validateSceneGoalAlignment,
   buildDirectorPrompt,
