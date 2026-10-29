@@ -189,22 +189,37 @@ function writeSyncedWordTimestamps(displayText, durationSeconds, wordsPath, voic
 }
 
 /**
- * Ưu tiên 1: Sử dụng Python edge-tts >= 7.2.8 trong my-video-engine/.venv
- * (Đã có bản vá DRM Sec-MS-GEC mới nhất của Microsoft Azure Neural Voice).
+ * Ưu tiên 1: Sử dụng Python edge-tts >= 7.3.1 trong my-video-engine/.venv
+ * (Đã có bản vá DRM Sec-MS-GEC v2 mới nhất của Microsoft Azure Neural Voice).
+ * Tự động retry tối đa 4 lần để không bao giờ rơi nhầm xuống giọng Google Translate nữ.
  */
 function synthesizeWithPythonEdgeTts(text, voice, rate, pitch, audioPath) {
   const pythonBin = resolvePythonBin();
   const pyScript = `
-import asyncio, sys, edge_tts
+import asyncio, os, sys, edge_tts
+
 async def main():
-    comm = edge_tts.Communicate(sys.argv[1], sys.argv[2], rate=sys.argv[3], pitch=sys.argv[4])
-    await comm.save(sys.argv[5])
+    text, voice, rate, pitch, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+    last_err = None
+    for attempt in range(1, 5):
+        try:
+            use_pitch = pitch if attempt <= 2 else "+0Hz"
+            comm = edge_tts.Communicate(text, voice, rate=rate, pitch=use_pitch)
+            await comm.save(out_path)
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 256:
+                return
+        except Exception as e:
+            last_err = e
+            await asyncio.sleep(0.6 * attempt)
+    if last_err:
+        raise last_err
+
 asyncio.run(main())
 `.trim();
 
   execFileSync(pythonBin, ['-c', pyScript, text, voice, rate, pitch, audioPath], {
-    stdio: 'ignore',
-    timeout: 25000,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    timeout: 45000,
   });
   return fs.existsSync(audioPath) && fs.statSync(audioPath).size > 256;
 }
@@ -227,14 +242,15 @@ async function generateSceneAudio(scene, voice, rate, audioDir, opts = {}) {
   const spokenText = cleanSpokenText(text, voice);
   const prosody = resolveEffectiveProsody(voice, rate, opts.pitch || scene.pitch);
 
-  const audioFileName = `scene_${scene.id}.mp3`;
-  const wordsFileName = `scene_${scene.id}_words.json`;
+  const filePrefix = opts.projectId ? `${opts.projectId}_scene_${scene.id}` : `scene_${scene.id}`;
+  const audioFileName = `${filePrefix}.mp3`;
+  const wordsFileName = `${filePrefix}_words.json`;
   const audioPath = path.join(audioDir, audioFileName);
   const wordsPath = path.join(audioDir, wordsFileName);
 
   let synthesized = false;
 
-  // Tầng 1: Python edge-tts 7.2.8 (Giọng Neural Microsoft chuẩn phòng thu)
+  // Tầng 1: Python edge-tts >= 7.3.1 (Giọng Neural Microsoft chuẩn phòng thu, ví dụ vi-VN-NamMinhNeural)
   try {
     synthesized = synthesizeWithPythonEdgeTts(
       spokenText,
@@ -243,7 +259,8 @@ async function generateSceneAudio(scene, voice, rate, audioDir, opts = {}) {
       prosody.pitch,
       audioPath
     );
-  } catch (_pyErr) {
+  } catch (pyErr) {
+    console.warn(`[TTS] Python edge-tts (${prosody.voice}) gặp lỗi:`, pyErr.stderr ? pyErr.stderr.toString() : pyErr.message);
     synthesized = false;
   }
 

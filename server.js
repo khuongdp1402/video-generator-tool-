@@ -1445,7 +1445,8 @@ async function executeProjectGeneration(id, options = {}) {
       project.scenes[i],
       selectedVoice,
       selectedRate,
-      AUDIO_DIR
+      AUDIO_DIR,
+      { projectId: project.id }
     );
     project.scenes[i] = audioResult;
     videoGenStore.updateProject(id, { scenes: project.scenes });
