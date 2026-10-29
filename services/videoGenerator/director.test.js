@@ -1,7 +1,12 @@
 // services/videoGenerator/director.test.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildDirectorPrompt, normalizeScenes } = require('./director');
+const {
+  buildDirectorPrompt,
+  normalizeScenes,
+  enforceSceneGoalAlignment,
+  validateSceneGoalAlignment,
+} = require('./director');
 
 test('story prompt embeds the raw script and asks for JSON only', () => {
   const prompt = buildDirectorPrompt('Ngày xửa ngày xưa có một chú thỏ.', 'story');
@@ -41,4 +46,29 @@ test('builds US and JP market-specific director prompts', () => {
   assert.match(jpPrompt, /日本語/);
   assert.match(jpPrompt, /ja-JP/);
 });
+
+test('enforceSceneGoalAlignment and validateSceneGoalAlignment support image_to_video, text_to_video, video_to_video, and image_stitch', () => {
+  const rawScene = {
+    id: 1,
+    text: 'Người trưởng thành chọn sự điềm tĩnh thay vì tranh cãi.',
+    highlightWords: ['điềm tĩnh', 'trưởng thành'],
+    imagePrompt: 'A calm man sitting by a window',
+    videoPrompt: 'Slow push in as rain falls outside',
+  };
+
+  for (const mode of ['image_to_video', 'text_to_video', 'video_to_video', 'image_stitch']) {
+    const check = validateSceneGoalAlignment(rawScene, {
+      kind: 'psych_split',
+      generationMode: mode,
+      title: 'SỨC MẠNH CỦA SỰ ĐIỀM TĨNH',
+      aspectRatio: '9:16',
+    });
+    assert.equal(check.valid, true);
+    assert.equal(check.score, 100);
+    assert.equal(check.generationMode, mode);
+    assert.match(check.alignedVideoPrompt, /SỨC MẠNH CỦA SỰ ĐIỀM TĨNH/);
+    assert.match(check.alignedVideoPrompt, new RegExp(`mode=${mode}`));
+  }
+});
+
 

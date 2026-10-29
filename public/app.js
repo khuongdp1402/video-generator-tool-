@@ -230,6 +230,9 @@ function setupEventListeners() {
   // Upload up to 8 reference images
   document.getElementById('vgRefInput')?.addEventListener('change', handleVgRefUpload);
 
+  // Upload source video for Video-to-Video (V2V)
+  document.getElementById('vgSourceVideoFile')?.addEventListener('change', handleVgSourceVideoUpload);
+
   // Studio Voice Preview Button
   document.getElementById('btnPreviewVoice')?.addEventListener('click', previewStudioVoice);
 
@@ -410,6 +413,32 @@ function removeVgRef(idx) {
   renderVgRefThumbs();
 }
 
+async function handleVgSourceVideoUpload(e) {
+  const file = (e.target.files || [])[0];
+  if (!file) return;
+  try {
+    showToast(`⏳ Đang tải video mẫu ${file.name}...`);
+    const buf = await file.arrayBuffer();
+    const res = await fetch('/api/uploads/source-video', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'video/mp4',
+        'X-File-Name': encodeURIComponent(file.name)
+      },
+      body: buf
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || 'Không thể tải video mẫu');
+    const pathEl = document.getElementById('vgSourceVideoPath');
+    if (pathEl) pathEl.value = json.file.path;
+    const genModeEl = document.getElementById('vgGenerationMode');
+    if (genModeEl) genModeEl.value = 'video_to_video';
+    showToast(`🎞️ Đã nạp video mẫu "${file.name}" cho chế độ Video-to-Video!`);
+  } catch (err) {
+    alert('Lỗi tải video mẫu: ' + err.message);
+  }
+}
+
 function getVgCommonPayload() {
   const kindEl = document.getElementById('vgKind');
   const layoutEl = document.getElementById('vgLayoutMode');
@@ -423,16 +452,20 @@ function getVgCommonPayload() {
   const voiceEl = document.getElementById('vgVoice');
   const voiceRateEl = document.getElementById('vgVoiceRate');
   const aiEngineEl = document.getElementById('vgAiEngine');
+  const genModeEl = document.getElementById('vgGenerationMode');
+  const sourceVideoEl = document.getElementById('vgSourceVideoPath');
 
   const voice = voiceEl?.value || 'vi-VN-NamMinhNeural';
   const voiceRate = voiceRateEl?.value || '+20%';
   const market = voice.startsWith('en-') ? 'US' : voice.startsWith('ja-') ? 'JP' : 'VI';
   const aiEngine = aiEngineEl?.value || 'muse_first';
   const mediaMode = aiEngine === 'gemini_first' ? 'gemini' : 'muse';
+  const generationMode = genModeEl?.value || 'image_to_video';
+  const sourceVideoPath = sourceVideoEl?.value?.trim() || '';
 
   return {
-    kind: kindEl?.value || 'psych_split',
-    layoutMode: layoutEl?.value || 'split',
+    kind: kindEl?.value || 'handdrawn',
+    layoutMode: layoutEl?.value || 'fullscreen',
     aspectRatio: ratioEl?.value || '9:16',
     targetDuration: Number(durationEl?.value) || 30,
     continuityOffset: Number(continuityEl?.value) || 0.3,
@@ -445,6 +478,8 @@ function getVgCommonPayload() {
     market,
     aiEngine,
     mediaMode,
+    generationMode,
+    sourceVideoPath,
     refs: (vgUploadedRefs || []).map(r => r.ref || r.path || r.url).filter(Boolean)
   };
 }
@@ -897,11 +932,16 @@ function vgRenderProject(project) {
 async function vgRetryScene(projectId, sceneId) {
   try {
     const common = getVgCommonPayload();
-    showToast('🔄 Đang tạo lại media cho cảnh (Ưu tiên #1: Muse.ai ➔ Dự phòng #2: Gemini Ultra)...');
+    showToast(`🔄 Đang tạo lại media (${common.generationMode}) cho cảnh (Muse.ai #1 ➔ Gemini Ultra #2)...`);
     const res = await fetch(`/api/video-gen/${projectId}/retry-scene/${sceneId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aiEngine: common.aiEngine, mediaMode: common.mediaMode })
+      body: JSON.stringify({
+        aiEngine: common.aiEngine,
+        mediaMode: common.mediaMode,
+        generationMode: common.generationMode,
+        sourceVideoPath: common.sourceVideoPath
+      })
     });
     const json = await res.json();
     if (!json.success) return alert(json.error);
@@ -937,6 +977,8 @@ async function vgGenerateAndRender() {
       body: JSON.stringify({
         aiEngine: common.aiEngine,
         mediaMode: common.mediaMode,
+        generationMode: common.generationMode,
+        sourceVideoPath: common.sourceVideoPath,
         voice: common.voice,
         voiceRate: common.voiceRate
       })

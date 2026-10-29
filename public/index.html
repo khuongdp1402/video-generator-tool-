@@ -164,7 +164,7 @@
               </div>
             </div>
 
-            <div class="style-card" data-style="handdrawn" data-layout="fullscreen" data-ratio="16:9">
+            <div class="style-card" data-style="handdrawn" data-layout="fullscreen" data-ratio="9:16">
               <div class="style-preview preview-handdrawn">
                 <div class="hand-box">✏️ Doodle 2D</div>
               </div>
@@ -235,8 +235,8 @@
               <div class="form-group">
                 <label>Bố cục hiển thị (Layout):</label>
                 <select id="vgLayoutMode" class="form-select">
-                  <option value="split">Khung 3 tầng (Tiêu đề vàng + Video + Song ngữ)</option>
-                  <option value="fullscreen">Toàn màn hình (Fullscreen)</option>
+                  <option value="fullscreen" selected>Toàn màn hình 1 tầng chuẩn (Không chia 3 tầng)</option>
+                  <option value="split">Khung chia đôi (Chỉ dành cho Đồ họa Nội bộ)</option>
                 </select>
               </div>
               <div class="form-group">
@@ -272,10 +272,10 @@
 
             <div class="form-group" style="background:rgba(99,102,241,0.09);border:1px solid rgba(99,102,241,0.35);padding:10px 12px;border-radius:10px;margin-bottom:12px;">
               <label style="color:#a5b4fc;font-weight:700;margin-bottom:6px;display:block;">
-                🚀 Engine Triển Khai Video AI (Chạy Ẩn 100% · Muse: camhien2000qt@gmail.com · Gemini Ultra: dophukhuong1234@gmail.com):
+                🚀 Engine & Chế Độ Tạo Video AI (Đảm bảo đúng mục tiêu kịch bản · Muse #1 · Gemini Ultra #2):
               </label>
-              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <select id="vgAiEngine" class="form-select" style="flex:1;min-width:260px;">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                <select id="vgAiEngine" class="form-select" style="flex:1;min-width:240px;">
                   <option value="muse_first" selected>🚀 Muse.ai (Ưu tiên #1 · camhien2000qt) ➔ Gemini Ultra (Dự phòng #2 · dophukhuong1234)</option>
                   <option value="muse_only">🟣 Chỉ dùng Muse.ai (camhien2000qt@gmail.com · Chạy Ngầm 9222)</option>
                   <option value="gemini_first">🔵 Gemini Ultra (Ưu tiên #1 · dophukhuong1234) ➔ Muse.ai (Dự phòng #2 · camhien2000qt)</option>
@@ -284,6 +284,21 @@
                 <button type="button" class="btn btn-secondary btn-sm" id="btnOpenMuseGeminiChrome" style="white-space:nowrap;height:38px;" title="Kích hoạt/kiểm tra kết nối chạy ngầm (Headless) Muse.ai (9222) & Gemini Ultra (9223)">
                   👻 Chạy Ẩn (Muse #1 + Gemini Ultra #2)
                 </button>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <select id="vgGenerationMode" class="form-select" style="flex:1;min-width:240px;">
+                  <option value="image_to_video" selected>🎬 Image-to-Video (Tạo ảnh Keyframe chuẩn mục tiêu ➔ Biến thành Video chuyển động)</option>
+                  <option value="text_to_video">🎥 Text-to-Video (Tạo trực tiếp Video clip từ kịch bản chuẩn mục tiêu)</option>
+                  <option value="video_to_video">🔄 Video-to-Video (Biến đổi / Đồng bộ chuyển động từ Video tham chiếu)</option>
+                  <option value="image_stitch">🖼️ Image Stitch (Tạo ảnh minh họa 2D + Ghép chuyển động Remotion nhanh)</option>
+                </select>
+                <div style="display:flex;gap:6px;flex:1;min-width:260px;align-items:center;">
+                  <input type="text" id="vgSourceVideoPath" class="form-input" style="flex:1;" placeholder="Video gốc cho Video-to-Video (bấm Tải Video Mẫu hoặc để trống tự lấy cảnh trước)" />
+                  <label class="btn btn-secondary btn-sm" style="cursor:pointer;white-space:nowrap;height:38px;display:inline-flex;align-items:center;">
+                    📂 Tải Video Mẫu
+                    <input type="file" id="vgSourceVideoFile" accept="video/mp4,video/quicktime,video/webm" hidden />
+                  </label>
+                </div>
               </div>
             </div>
 

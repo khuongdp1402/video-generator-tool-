@@ -170,6 +170,74 @@ def _render_scene_frames(
     return total_frames
 
 
+def _probe_video_duration(video_path: Path) -> float:
+    env = os.environ.copy()
+    extra_paths = [str(Path.home() / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+    env["PATH"] = os.pathsep.join(extra_paths + [env.get("PATH", "")])
+    try:
+        res = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=8,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return float(res.stdout.strip())
+    except Exception:
+        pass
+    return 0.0
+
+
+def _fit_image_single_layer(image_path: Path, width: int, height: int, tmp_root: Path, scene_id) -> Path:
+    """
+    Ensure every still image renders as a 100% single-layer full-screen frame
+    with ZERO 3-tier blur bars and ZERO liquid glass boxes.
+    If an illustration has a uniform paper/canvas background (e.g. 2D hand-drawn cream paper)
+    and differs in aspect ratio, seamlessly extend the exact paper color to fill width x height.
+    """
+    try:
+        im = Image.open(image_path).convert("RGB")
+        iw, ih = im.size
+        target_ratio = width / max(1, height)
+        src_ratio = iw / max(1, ih)
+        if abs(src_ratio - target_ratio) / target_ratio < 0.18:
+            return image_path
+
+        # Sample corners to check if this is a uniform paper/canvas illustration
+        corners = [
+            im.getpixel((min(iw - 1, 12), min(ih - 1, 12))),
+            im.getpixel((max(0, iw - 13), min(ih - 1, 12))),
+            im.getpixel((min(iw - 1, 12), max(0, ih - 13))),
+            im.getpixel((max(0, iw - 13), max(0, ih - 13))),
+        ]
+        avg_r = sum(c[0] for c in corners) // 4
+        avg_g = sum(c[1] for c in corners) // 4
+        avg_b = sum(c[2] for c in corners) // 4
+        max_diff = max(abs(c[0] - avg_r) + abs(c[1] - avg_g) + abs(c[2] - avg_b) for c in corners)
+
+        if max_diff < 55:
+            # Uniform paper/canvas background -> seamless single-sheet canvas extension!
+            canvas = Image.new("RGB", (width, height), (avg_r, avg_g, avg_b))
+            scale = min(width / iw, (height * 0.72) / ih)
+            nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+            resized = im.resize((nw, nh), Image.Resampling.LANCZOS)
+            px = (width - nw) // 2
+            py = int((height - nh) * 0.42)
+            canvas.paste(resized, (px, py))
+            out_p = tmp_root / f"seamless_single_{scene_id}.png"
+            canvas.save(out_p)
+            return out_p
+    except Exception as exc:
+        logger.warning("Could not pre-fit image %s: %s", image_path, exc)
+    return image_path
+
+
 def _encode_scene(
     frames_dir: Path,
     audio_path: Path | None,
@@ -181,9 +249,19 @@ def _encode_scene(
     height: int = 1920,
 ) -> None:
     if video_bg_path and video_bg_path.exists():
-        cmd = [
-            "ffmpeg", "-y",
-            "-stream_loop", "-1", "-i", str(video_bg_path),
+        v_dur = _probe_video_duration(video_bg_path)
+        stretch_pts = ""
+        use_loop = True
+        if v_dur > 0.5 and v_dur < duration_seconds <= v_dur * 1.85:
+            ratio = (duration_seconds + 0.15) / v_dur
+            stretch_pts = f"setpts={ratio:.4f}*PTS,"
+            use_loop = False
+
+        cmd = ["ffmpeg", "-y"]
+        if use_loop:
+            cmd += ["-stream_loop", "-1"]
+        cmd += [
+            "-i", str(video_bg_path),
             "-framerate", str(fps), "-i", str(frames_dir / "%06d.png"),
         ]
         if audio_path and audio_path.exists():
@@ -196,7 +274,7 @@ def _encode_scene(
             ]
         cmd += [
             "-filter_complex",
-            f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[bg];"
+            f"[0:v]{stretch_pts}scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps={fps},setsar=1[bg];"
             f"[bg][1:v]overlay=0:0:shortest=1[v]",
             "-map", "[v]", "-map", "2:a",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-shortest",
@@ -308,7 +386,7 @@ def render_video(data_file=None, output_file=None) -> Path:
                 is_video_bg = _is_video_media(media_path)
                 image_path = None
                 if media_path and not is_video_bg:
-                    image_path = media_path
+                    image_path = _fit_image_single_layer(media_path, width, height, tmp_root, scene_id)
                 elif not media_path:
                     logger.warning("Scene %s has no media yet — using placeholder image", scene_id)
                     image_path = tmp_root / f"placeholder_{scene_id}.png"

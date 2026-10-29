@@ -4,6 +4,130 @@ const { extractJson, JsonExtractionError } = require('./chatJson');
 const { sendPromptAndWaitForStableReply } = require('./geminiChat');
 const { chatCompletionJson } = require('./agentgwClient');
 
+const VALID_GENERATION_MODES = [
+  'image_to_video',
+  'text_to_video',
+  'video_to_video',
+  'image_stitch',
+];
+
+function resolveGenerationMode(mode, fallback = 'image_to_video') {
+  const normalized = String(mode || '').trim().toLowerCase();
+  return VALID_GENERATION_MODES.includes(normalized) ? normalized : fallback;
+}
+
+/**
+ * Đảm bảo imagePrompt & videoPrompt của mỗi scene luôn bám sát 100% mục tiêu kịch bản,
+ * chủ đề (title/lessonText), quy tắc nhất quán nhân vật (characterStyleBlock, filmRules),
+ * tỉ lệ khung hình (aspectRatio) và chuyển động camera (cameraMotion).
+ */
+function enforceSceneGoalAlignment(scene = {}, opts = {}) {
+  const kind = opts.kind || scene.kind || 'story';
+  const preset = getStylePreset(kind);
+  const styleBlock = (opts.characterStyleBlock || preset.characterStyleBlock || '').trim();
+  const aspectRatio = opts.aspectRatio || scene.aspectRatio || preset.defaultAspectRatio || '9:16';
+  const ratioLabel = aspectRatio === '16:9' ? '16:9 widescreen cinematic' : '9:16 vertical full-frame';
+  const generationMode = resolveGenerationMode(
+    scene.generationMode || opts.generationMode,
+    'image_to_video'
+  );
+  const cameraMotion =
+    scene.cameraMotion ||
+    opts.cameraMotion ||
+    'smooth cinematic camera push-in, natural subject motion, high temporal consistency';
+
+  const coreNarrative = (scene.textEn || scene.text || '').trim();
+  const goalTitle = (opts.title || scene.goalAnchor || '').trim();
+  const filmRules = (opts.filmRules || '').trim();
+  const highlights = Array.isArray(scene.highlightWords) && scene.highlightWords.length > 0
+    ? `Key visual focus: ${scene.highlightWords.join(', ')}.`
+    : '';
+
+  let baseImagePrompt = (scene.imagePrompt || scene.videoPrompt || coreNarrative || '').trim();
+  let baseVideoPrompt = (scene.videoPrompt || scene.imagePrompt || coreNarrative || '').trim();
+
+  // Bổ sung styleBlock nếu chưa có
+  const styleProbe = styleBlock.slice(0, 28).toLowerCase();
+  if (styleBlock && (!styleProbe || !baseImagePrompt.toLowerCase().includes(styleProbe))) {
+    baseImagePrompt = `${baseImagePrompt}. Style: ${styleBlock}`;
+  }
+  if (styleBlock && (!styleProbe || !baseVideoPrompt.toLowerCase().includes(styleProbe))) {
+    baseVideoPrompt = `${baseVideoPrompt}. Style: ${styleBlock}`;
+  }
+
+  // Bổ sung mục tiêu cốt lõi của cảnh (Goal Anchor) để video không bị lạc đề
+  const goalClause = [
+    goalTitle ? `Overall Goal: "${goalTitle}".` : '',
+    coreNarrative ? `Scene Action & Meaning: "${coreNarrative}".` : '',
+    highlights,
+    filmRules ? `Consistency Rules: ${filmRules}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const alignedImagePrompt = [
+    `[${ratioLabel} keyframe]`,
+    baseImagePrompt,
+    goalClause,
+    'Strict goal fidelity: accurate subject anatomy, clear visual storytelling matching the script, no unrelated objects or gibberish text.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const modeMotionDirective =
+    generationMode === 'image_to_video'
+      ? `Animate the reference keyframe image smoothly (${cameraMotion}) while preserving 100% character identity and composition.`
+      : generationMode === 'video_to_video'
+      ? `Transform and restyle the reference video motion (${cameraMotion}) while keeping motion timing and fulfilling the scene goal.`
+      : `Direct text-to-video generation (${cameraMotion}) with coherent beginning-to-end action.`;
+
+  const alignedVideoPrompt = [
+    `[${ratioLabel} video · mode=${generationMode}]`,
+    baseVideoPrompt,
+    modeMotionDirective,
+    goalClause,
+    'Strict goal fidelity: coherent physical motion, zero flickering, stay 100% faithful to the required scene objective.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return {
+    ...scene,
+    generationMode,
+    cameraMotion,
+    goalAnchor: goalTitle || coreNarrative.slice(0, 120),
+    imagePrompt: scene.imagePrompt || baseImagePrompt,
+    videoPrompt: scene.videoPrompt || baseVideoPrompt,
+    alignedImagePrompt,
+    alignedVideoPrompt,
+  };
+}
+
+/**
+ * Kiểm định mức độ bám sát mục tiêu (Goal Alignment Validation) của scene
+ * trước khi gửi sang Muse.ai / Gemini Ultra Veo.
+ */
+function validateSceneGoalAlignment(scene = {}, opts = {}) {
+  const aligned = enforceSceneGoalAlignment(scene, opts);
+  const missing = [];
+  if (!aligned.text && !aligned.textEn) missing.push('narrative_text');
+  if (!aligned.imagePrompt && !aligned.videoPrompt) missing.push('visual_prompt');
+  if (!VALID_GENERATION_MODES.includes(aligned.generationMode)) missing.push('valid_generation_mode');
+
+  const hasStyle = Boolean(aligned.alignedVideoPrompt && aligned.alignedVideoPrompt.length > 30);
+  if (!hasStyle) missing.push('style_and_goal_context');
+
+  const score = Math.max(0, 100 - missing.length * 25);
+  return {
+    valid: missing.length === 0,
+    score,
+    missing,
+    generationMode: aligned.generationMode,
+    alignedImagePrompt: aligned.alignedImagePrompt,
+    alignedVideoPrompt: aligned.alignedVideoPrompt,
+  };
+}
+
 function buildDirectorPrompt(rawScript, kind, opts = {}) {
   const script = (rawScript || '').trim();
   if (!script) {
@@ -217,23 +341,35 @@ function normalizeScenes(rawScenes, opts = {}) {
     throw new Error('Director trả về danh sách scene rỗng hoặc không hợp lệ.');
   }
   const sceneType = opts.layoutMode === 'split' ? 'split_media' : 'media';
+  const defaultGenMode = resolveGenerationMode(opts.generationMode, 'image_to_video');
   return rawScenes.map((s, i) => ({
     id: i + 1,
     type: s.type || sceneType,
     text: s.text || '',
     textEn: s.textEn || '',
     visualMode: s.visualMode || 'standard',
+    generationMode: resolveGenerationMode(s.generationMode, defaultGenMode),
+    cameraMotion:
+      s.cameraMotion ||
+      opts.cameraMotion ||
+      'smooth cinematic camera push-in, subtle natural subject motion',
     highlightWords: Array.isArray(s.highlightWords) ? s.highlightWords : [],
     imagePrompt: s.imagePrompt || '',
     videoPrompt: s.videoPrompt || '',
     durationSec: s.durationSec || 6,
     audioFile: s.audioFile || '',
     mediaFile: s.mediaFile || '',
+    keyframeFile: s.keyframeFile || '',
+    sourceVideoPath: s.sourceVideoPath || opts.sourceVideoPath || '',
     mediaStatus: s.mediaStatus || 'pending',
   }));
 }
 
 module.exports = {
+  VALID_GENERATION_MODES,
+  resolveGenerationMode,
+  enforceSceneGoalAlignment,
+  validateSceneGoalAlignment,
   buildDirectorPrompt,
   planScenes,
   planScenesWithAgentGW,

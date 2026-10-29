@@ -5,6 +5,7 @@ const {
   DEFAULT_CDP_URL,
   DEFAULT_MUSE_URL,
   buildMuseFullVideoPrompt,
+  buildMuseSceneVideoPrompt,
   planScenesWithMuse,
 } = require('./museChat');
 
@@ -90,3 +91,26 @@ test('planScenesWithMuse parses JSON scenes returned from Muse page', async () =
   assert.equal(planRes.scenes[0].mediaStatus, 'pending');
   assert.match(planRes.scenes[0].videoPrompt, /Tokyo sunrise/);
 });
+
+test('buildMuseSceneVideoPrompt formats distinct prompts for image_to_video, text_to_video, video_to_video, and image_stitch', () => {
+  const scene = {
+    id: 1,
+    text: 'Thói quen nhỏ tạo nên thay đổi lớn.',
+    imagePrompt: 'Minimalist sunrise over mountain',
+    videoPrompt: 'Camera slowly pans across mountain peak',
+  };
+
+  const i2v = buildMuseSceneVideoPrompt(scene, { generationMode: 'image_to_video', title: 'KỶ LUẬT TỰ GIÁC' });
+  assert.match(i2v, /animate the attached reference keyframe image/i);
+  assert.match(i2v, /KỶ LUẬT TỰ GIÁC/);
+
+  const t2v = buildMuseSceneVideoPrompt(scene, { generationMode: 'text_to_video', title: 'KỶ LUẬT TỰ GIÁC' });
+  assert.match(t2v, /animated MP4 video clip for this scene/i);
+
+  const v2v = buildMuseSceneVideoPrompt(scene, { generationMode: 'video_to_video', title: 'KỶ LUẬT TỰ GIÁC' });
+  assert.match(v2v, /video-to-video transformation/i);
+
+  const stitch = buildMuseSceneVideoPrompt(scene, { generationMode: 'image_stitch', title: 'KỶ LUẬT TỰ GIÁC' });
+  assert.match(stitch, /illustration image right now/i);
+});
+

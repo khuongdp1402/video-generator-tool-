@@ -38,4 +38,32 @@ function extractContinuityFrame(videoPath, outputName, secondsBeforeEnd = 0.3) {
   });
 }
 
-module.exports = { extractContinuityFrame, CONTINUITY_DIR };
+/**
+ * Extract multiple motion reference frames (e.g. start, middle, end) from a source video
+ * for Video-to-Video (V2V) conditioning and motion continuity.
+ */
+async function extractVideoMotionFrames(videoPath, outputPrefix, offsetsBeforeEnd = [2.5, 1.2, 0.3]) {
+  if (!videoPath || !fs.existsSync(videoPath)) {
+    throw new Error(`Không tìm thấy file video nguồn để trích xuất chuỗi chuyển động V2V: ${videoPath}`);
+  }
+  const frames = [];
+  for (let i = 0; i < offsetsBeforeEnd.length; i++) {
+    try {
+      const framePath = await extractContinuityFrame(
+        videoPath,
+        `${outputPrefix}_v2v_f${i + 1}`,
+        offsetsBeforeEnd[i]
+      );
+      frames.push(framePath);
+    } catch (_err) {
+      // Fallback to 0.3s if video is shorter than offset
+      if (frames.length === 0) {
+        const fallbackFrame = await extractContinuityFrame(videoPath, `${outputPrefix}_v2v_fallback`, 0.2);
+        frames.push(fallbackFrame);
+      }
+    }
+  }
+  return frames;
+}
+
+module.exports = { extractContinuityFrame, extractVideoMotionFrames, CONTINUITY_DIR };

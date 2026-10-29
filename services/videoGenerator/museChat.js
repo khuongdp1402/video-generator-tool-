@@ -2,8 +2,14 @@
 const fs = require('fs');
 const path = require('path');
 const { extractJson, JsonExtractionError } = require('./chatJson');
-const { buildDirectorPrompt, normalizeScenes } = require('./director');
+const {
+  buildDirectorPrompt,
+  normalizeScenes,
+  resolveGenerationMode,
+  enforceSceneGoalAlignment,
+} = require('./director');
 const { getMarketPreset } = require('./stylePresets');
+const { extractVideoMotionFrames } = require('./continuity');
 
 const DEFAULT_CDP_URL = process.env.MUSE_CDP_URL || 'http://localhost:9222';
 const DEFAULT_MUSE_URL = process.env.MUSE_URL || 'https://muse.ai';
@@ -265,52 +271,75 @@ async function sendMusePromptAndWaitForReply(page, promptText, opts = {}) {
   throw new Error(`Hết thời gian chờ (${timeoutMs / 1000}s) phản hồi kịch bản từ Muse.`);
 }
 
-async function countNonAvatarVideos(page) {
-  if (typeof page.evaluate !== 'function') return 0;
+async function getRealVideoSrcsOnMuse(page) {
+  if (typeof page.evaluate !== 'function') return [];
   return page
     .evaluate(() => {
-      const vids = Array.from(document.querySelectorAll('video')).filter(
-        (v) =>
-          !v.closest('[data-hatch-avatar-interaction]') &&
-          !v.hasAttribute('data-hatch-avatar-layer')
-      );
-      return vids.length;
+      return Array.from(document.querySelectorAll('video'))
+        .filter(
+          (v) =>
+            v.getAttribute('aria-hidden') !== 'true' &&
+            !v.closest('[data-hatch-avatar-interaction]') &&
+            !v.hasAttribute('data-hatch-avatar-layer') &&
+            !(v.videoWidth === 480 && v.videoHeight === 480)
+        )
+        .map((v) => v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src) || '')
+        .filter((s) => s.startsWith('blob:') || s.startsWith('http'));
     })
-    .catch(() => 0);
+    .catch(() => []);
+}
+
+async function countNonAvatarVideos(page) {
+  const srcs = await getRealVideoSrcsOnMuse(page);
+  return srcs.length;
+}
+
+async function extractNewestVideoSrcOnMuse(page, knownSrcs = []) {
+  if (typeof page.evaluate !== 'function') return null;
+  return page
+    .evaluate((prevSrcs) => {
+      const prevSet = new Set(prevSrcs || []);
+      const candidates = Array.from(document.querySelectorAll('video')).filter(
+        (v) =>
+          v.getAttribute('aria-hidden') !== 'true' &&
+          !v.closest('[data-hatch-avatar-interaction]') &&
+          !v.hasAttribute('data-hatch-avatar-layer') &&
+          !(v.videoWidth === 480 && v.videoHeight === 480) &&
+          (v.videoWidth > 200 || v.readyState >= 2)
+      );
+      for (const v of candidates) {
+        const src = v.currentSrc || v.src || (v.querySelector('source') && v.querySelector('source').src) || '';
+        if ((src.startsWith('blob:') || src.startsWith('http')) && !prevSet.has(src)) {
+          return src;
+        }
+      }
+      return null;
+    }, knownSrcs)
+    .catch(() => null);
 }
 
 async function extractLatestVideoUrl(page, initialVideoCount) {
-  if (typeof page.evaluate !== 'function') return null;
-  return page.evaluate((prevCount) => {
-    const videos = Array.from(document.querySelectorAll('video')).filter(
-      (v) =>
-        !v.closest('[data-hatch-avatar-interaction]') &&
-        !v.hasAttribute('data-hatch-avatar-layer')
-    );
-    if (videos.length > prevCount) {
-      const lastVideo = videos[videos.length - 1];
-      const vSrc = lastVideo.src || lastVideo.currentSrc || '';
-      if (vSrc && (vSrc.startsWith('http') || vSrc.startsWith('blob:'))) return vSrc;
-      const source = lastVideo.querySelector('source');
-      if (source && source.src && (source.src.startsWith('http') || source.src.startsWith('blob:'))) {
-        return source.src;
-      }
+  const srcs = await getRealVideoSrcsOnMuse(page);
+  if (srcs.length > initialVideoCount) {
+    return srcs[0];
+  }
+  return null;
+}
+
+async function attachFilesOnMuse(page, filePaths = []) {
+  const validFiles = (filePaths || []).filter((p) => p && fs.existsSync(p));
+  if (validFiles.length === 0) return false;
+  try {
+    const fileInput = page.locator('[data-hatch-composer-chrome="true"] input[type="file"], input[type="file"]').first();
+    if ((await fileInput.count()) > 0) {
+      await fileInput.setInputFiles(validFiles);
+      await page.waitForTimeout(1800);
+      return true;
     }
-    const downloadLinks = Array.from(
-      document.querySelectorAll('a[download], a[href*=".mp4"], a[href*="video"]')
-    );
-    for (let i = downloadLinks.length - 1; i >= 0; i--) {
-      const href = downloadLinks[i].href;
-      if (
-        href &&
-        (href.startsWith('http') || href.startsWith('blob:')) &&
-        (href.includes('.mp4') || downloadLinks[i].hasAttribute('download'))
-      ) {
-        return href;
-      }
-    }
-    return null;
-  }, initialVideoCount);
+  } catch (err) {
+    console.warn('[Muse.ai] Không thể đính kèm file tham chiếu:', err.message);
+  }
+  return false;
 }
 
 async function downloadVideoUrlOrBlobToDisk(page, videoUrl, outputPath) {
@@ -384,45 +413,24 @@ async function tryExtractNewestLibraryVideoOnMuse(page, outputPath) {
 }
 
 async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = {}) {
-  const { timeoutMs = 180000, pollMs = 3000 } = opts;
+  const { timeoutMs = 150000, pollMs = 2500 } = opts;
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const initialVideoCount = await countNonAvatarVideos(page);
-  const initialMsgState = await getMuseLastMessageState(page);
-  const initialLastText = initialMsgState ? cleanMuseReplyText(initialMsgState.lastAsstText) : '';
+  const knownVideoSrcs = await getRealVideoSrcsOnMuse(page);
 
   const videoRequestPrompt =
-    promptText.toLowerCase().includes('create a video') || promptText.toLowerCase().includes('tạo video')
+    promptText.toLowerCase().includes('video') || promptText.toLowerCase().includes('mp4')
       ? promptText
-      : `Create a short 9:16 vertical video clip for this scene: ${promptText}`;
+      : `Use your MP4 video generation tool right now (do NOT generate a still image, call your video tool immediately) to create a vertical 9:16 (720x1280) full-screen single-layer video clip: ${promptText}`;
 
   await submitPromptOnMuse(page, videoRequestPrompt);
 
   const startTime = Date.now();
   let videoUrl = null;
-  let lastReplyText = '';
-  let stableReplyChecks = 0;
 
   while (Date.now() - startTime < timeoutMs) {
-    videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
+    videoUrl = await extractNewestVideoSrcOnMuse(page, knownVideoSrcs);
     if (videoUrl) break;
-
-    const msgState = await getMuseLastMessageState(page);
-    if (msgState && msgState.lastRole === 'assistant') {
-      const currentReply = cleanMuseReplyText(msgState.lastText);
-      if (currentReply && currentReply.length > 15 && currentReply !== initialLastText) {
-        if (currentReply === lastReplyText) {
-          stableReplyChecks += 1;
-          if (stableReplyChecks >= 3 && Date.now() - startTime > 8000) {
-            break;
-          }
-        } else {
-          stableReplyChecks = 0;
-        }
-        lastReplyText = currentReply;
-      }
-    }
-
     await page.waitForTimeout(pollMs);
   }
 
@@ -434,7 +442,7 @@ async function waitForMuseVideoAndDownload(page, promptText, outputPath, opts = 
   const libSaved = await tryExtractNewestLibraryVideoOnMuse(page, outputPath);
   if (libSaved) return libSaved;
 
-  throw new Error('Hết thời gian chờ Muse sinh video mới. Đang chuyển sang phương án dự phòng.');
+  throw new Error('Hết thời gian chờ Muse sinh video MP4 mới. Đang chuyển sang phương án dự phòng.');
 }
 
 async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US') {
@@ -510,22 +518,59 @@ async function extractNewestLargeImagePngOnMuse(page, knownSrcs = []) {
     .catch(() => null);
 }
 
-async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
-  fs.mkdirSync(mediaDir, { recursive: true });
-  const filePrefix = opts.projectId ? `${opts.projectId}_scene_${scene.id}` : `scene_${scene.id}`;
-  const pngOutputPath = path.join(mediaDir, `${filePrefix}.png`);
-  const mp4OutputPath = path.join(mediaDir, `${filePrefix}.mp4`);
+function buildMuseSceneVideoPrompt(scene, opts = {}) {
+  const generationMode = resolveGenerationMode(
+    opts.generationMode || scene.generationMode,
+    'image_to_video'
+  );
+  const aspectRatio = opts.aspectRatio || scene.aspectRatio || '9:16';
+  const ratioSpec =
+    aspectRatio === '16:9'
+      ? 'horizontal 16:9 widescreen (1280x720) full-screen single-layer'
+      : 'vertical 9:16 portrait (720x1280) full-screen single-layer (NO split-screen, NO blurred top/bottom borders, NO text/watermarks)';
 
+  const aligned = enforceSceneGoalAlignment(scene, {
+    ...opts,
+    generationMode,
+    aspectRatio,
+  });
+
+  if (generationMode === 'image_stitch') {
+    return `Generate a single ${ratioSpec} illustration image right now (do not ask questions, call your image generation tool immediately): ${aligned.alignedImagePrompt}`;
+  }
+
+  if (generationMode === 'image_to_video') {
+    return (
+      `Use your MP4 video generation tool right now (do NOT output a still image, do NOT ask questions, call your video tool immediately) ` +
+      `to animate the attached reference keyframe image into a smooth 5-second ${ratioSpec} MP4 video clip: ${aligned.alignedVideoPrompt}`
+    );
+  }
+
+  if (generationMode === 'video_to_video') {
+    return (
+      `Use your MP4 video generation tool right now (do NOT output a still image, call your video tool immediately) ` +
+      `to create a 5-second ${ratioSpec} video-to-video transformation MP4 clip from the attached motion reference frames/video: ${aligned.alignedVideoPrompt}`
+    );
+  }
+
+  // Default: text_to_video
+  return (
+    `Use your MP4 video generation tool right now (do NOT output a still image, do NOT ask questions, call your video tool immediately) ` +
+    `to create a 5-second ${ratioSpec} animated MP4 video clip for this scene: ${aligned.alignedVideoPrompt}`
+  );
+}
+
+async function generateKeyframeImageOnMuse(page, alignedScene, pngOutputPath, opts = {}) {
+  const aspectRatio = opts.aspectRatio || alignedScene.aspectRatio || '9:16';
+  const ratioSpec =
+    aspectRatio === '16:9'
+      ? 'horizontal 16:9 widescreen (1280x720) full-screen single-layer'
+      : 'vertical 9:16 portrait (720x1280) full-screen single-layer (NO split-screen, NO blurred bars)';
   const knownImgSrcs = await getLargeImageSrcsOnMuse(page);
-  const initialVideoCount = await countNonAvatarVideos(page);
+  const keyframePrompt = `Generate a single ${ratioSpec} keyframe image right now (do not ask questions, call your image generation tool immediately): ${alignedScene.alignedImagePrompt}`;
+  await submitPromptOnMuse(page, keyframePrompt);
 
-  const rawPrompt = scene.imagePrompt || scene.videoPrompt || scene.text;
-  const imageRequestPrompt =
-    `Generate a single 2D illustration image right now (do not ask questions, call your image generation tool immediately): ${rawPrompt}`;
-
-  await submitPromptOnMuse(page, imageRequestPrompt);
-
-  const timeoutMs = opts.timeoutMs || 55000;
+  const timeoutMs = opts.keyframeTimeoutMs || 45000;
   const pollMs = opts.pollMs || 2000;
   const startTime = Date.now();
 
@@ -535,29 +580,176 @@ async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
       const buf = Buffer.from(pngBase64, 'base64');
       if (buf.length > 2000) {
         fs.writeFileSync(pngOutputPath, buf);
-        console.log(`[Muse.ai] Đã tạo & lưu ảnh minh họa Scene ${scene.id}: ${pngOutputPath} (${buf.length} bytes)`);
-        return {
-          mediaStatus: 'image',
-          mediaFile: `media/${filePrefix}.png`,
-          localPath: pngOutputPath,
-        };
+        return pngOutputPath;
       }
     }
-
-    const videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
-    if (videoUrl) {
-      await downloadVideoUrlOrBlobToDisk(page, videoUrl, mp4OutputPath);
-      return {
-        mediaStatus: 'video',
-        mediaFile: `media/${filePrefix}.mp4`,
-        localPath: mp4OutputPath,
-      };
-    }
-
     await page.waitForTimeout(pollMs);
   }
+  return null;
+}
 
-  throw new Error(`Hết thời gian chờ Muse.ai tạo hình ảnh cho Scene ${scene.id}`);
+async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const filePrefix = opts.projectId ? `${opts.projectId}_scene_${scene.id}` : `scene_${scene.id}`;
+  const pngOutputPath = path.join(mediaDir, `${filePrefix}.png`);
+  const mp4OutputPath = path.join(mediaDir, `${filePrefix}.mp4`);
+
+  const generationMode = resolveGenerationMode(
+    opts.generationMode || scene.generationMode,
+    'image_to_video'
+  );
+  const alignedScene = enforceSceneGoalAlignment(scene, {
+    ...opts,
+    generationMode,
+  });
+
+  // 1. Chế độ Image Stitch (Tạo ảnh 2D + ghép Remotion)
+  if (generationMode === 'image_stitch') {
+    const knownImgSrcs = await getLargeImageSrcsOnMuse(page);
+    const initialVideoCount = await countNonAvatarVideos(page);
+    await attachFilesOnMuse(page, opts.refs || scene.refs || []);
+    const imageRequestPrompt = buildMuseSceneVideoPrompt(alignedScene, {
+      ...opts,
+      generationMode: 'image_stitch',
+    });
+    await submitPromptOnMuse(page, imageRequestPrompt);
+
+    const timeoutMs = opts.timeoutMs || 55000;
+    const pollMs = opts.pollMs || 2000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      const pngBase64 = await extractNewestLargeImagePngOnMuse(page, knownImgSrcs);
+      if (pngBase64) {
+        const buf = Buffer.from(pngBase64, 'base64');
+        if (buf.length > 2000) {
+          fs.writeFileSync(pngOutputPath, buf);
+          console.log(`[Muse.ai · image_stitch] Đã lưu ảnh Scene ${scene.id}: ${pngOutputPath}`);
+          return {
+            mediaStatus: 'image',
+            generationMode: 'image_stitch',
+            mediaFile: `media/${filePrefix}.png`,
+            localPath: pngOutputPath,
+          };
+        }
+      }
+      const videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
+      if (videoUrl) {
+        await downloadVideoUrlOrBlobToDisk(page, videoUrl, mp4OutputPath);
+        return {
+          mediaStatus: 'video',
+          generationMode: 'image_stitch',
+          mediaFile: `media/${filePrefix}.mp4`,
+          localPath: mp4OutputPath,
+        };
+      }
+      await page.waitForTimeout(pollMs);
+    }
+    throw new Error(`Hết thời gian chờ Muse.ai tạo hình ảnh (image_stitch) cho Scene ${scene.id}`);
+  }
+
+  // 2. Chế độ Image-to-Video (Tạo/Lấy Keyframe chuẩn mục tiêu -> Animate thành Video MP4)
+  if (generationMode === 'image_to_video') {
+    let keyframePath =
+      (scene.keyframePath && fs.existsSync(scene.keyframePath) && scene.keyframePath) ||
+      (fs.existsSync(pngOutputPath) && pngOutputPath) ||
+      null;
+
+    if (!keyframePath) {
+      await attachFilesOnMuse(page, opts.refs || scene.refs || []);
+      console.log(`[Muse.ai · I2V · Scene ${scene.id}] Bước 1/2: Tạo ảnh Keyframe chuẩn mục tiêu...`);
+      keyframePath = await generateKeyframeImageOnMuse(page, alignedScene, pngOutputPath, opts);
+    }
+
+    const refsToAttach = [
+      ...(keyframePath ? [keyframePath] : []),
+      ...((opts.refs || scene.refs || []).filter((p) => p !== keyframePath)),
+    ];
+    await attachFilesOnMuse(page, refsToAttach);
+
+    const i2vPrompt = buildMuseSceneVideoPrompt(alignedScene, {
+      ...opts,
+      generationMode: 'image_to_video',
+    });
+    console.log(`[Muse.ai · I2V · Scene ${scene.id}] Bước 2/2: Biến ảnh Keyframe thành Video chuyển động...`);
+    try {
+      await waitForMuseVideoAndDownload(page, i2vPrompt, mp4OutputPath, {
+        timeoutMs: opts.videoTimeoutMs || opts.timeoutMs || 150000,
+        pollMs: opts.pollMs || 2500,
+      });
+      return {
+        mediaStatus: 'video',
+        generationMode: 'image_to_video',
+        mediaFile: `media/${filePrefix}.mp4`,
+        keyframeFile: keyframePath ? `media/${filePrefix}.png` : '',
+        localPath: mp4OutputPath,
+      };
+    } catch (videoErr) {
+      if (keyframePath && opts.allowKeyframeFallback !== false) {
+        console.warn(
+          `[Muse.ai · I2V · Scene ${scene.id}] Chưa lấy được MP4 (${videoErr.message}), giữ Keyframe chuẩn mục tiêu để không đứt luồng.`
+        );
+        return {
+          mediaStatus: 'image',
+          generationMode: 'image_to_video',
+          mediaFile: `media/${filePrefix}.png`,
+          keyframeFile: `media/${filePrefix}.png`,
+          localPath: keyframePath,
+        };
+      }
+      throw videoErr;
+    }
+  }
+
+  // 3. Chế độ Video-to-Video (Trích xuất chuyển động từ video nguồn + Biến đổi sang Video mục tiêu)
+  if (generationMode === 'video_to_video') {
+    const sourceVideo =
+      scene.sourceVideoPath || opts.sourceVideoPath || opts.continuityVideoPath || '';
+    let motionRefs = [];
+    if (sourceVideo && fs.existsSync(sourceVideo)) {
+      try {
+        motionRefs = await extractVideoMotionFrames(sourceVideo, `${filePrefix}`);
+      } catch (extractErr) {
+        console.warn(`[Muse.ai · V2V · Scene ${scene.id}] Không trích xuất được motion frames: ${extractErr.message}`);
+      }
+    }
+    const allRefs = [...motionRefs, ...(opts.refs || scene.refs || [])];
+    await attachFilesOnMuse(page, allRefs);
+
+    const v2vPrompt = buildMuseSceneVideoPrompt(alignedScene, {
+      ...opts,
+      generationMode: 'video_to_video',
+    });
+    console.log(`[Muse.ai · V2V · Scene ${scene.id}] Đang biến đổi Video-to-Video (tham chiếu chuyển động: ${motionRefs.length} frames)...`);
+    await waitForMuseVideoAndDownload(page, v2vPrompt, mp4OutputPath, {
+      timeoutMs: opts.videoTimeoutMs || opts.timeoutMs || 150000,
+      pollMs: opts.pollMs || 2500,
+    });
+    return {
+      mediaStatus: 'video',
+      generationMode: 'video_to_video',
+      mediaFile: `media/${filePrefix}.mp4`,
+      localPath: mp4OutputPath,
+    };
+  }
+
+  // 4. Chế độ Text-to-Video (Tạo trực tiếp Video MP4 từ kịch bản chuẩn mục tiêu)
+  await attachFilesOnMuse(page, opts.refs || scene.refs || []);
+  const t2vPrompt = buildMuseSceneVideoPrompt(alignedScene, {
+    ...opts,
+    generationMode: 'text_to_video',
+  });
+  console.log(`[Muse.ai · T2V · Scene ${scene.id}] Đang tạo trực tiếp Video clip từ kịch bản chuẩn mục tiêu...`);
+  await waitForMuseVideoAndDownload(page, t2vPrompt, mp4OutputPath, {
+    timeoutMs: opts.videoTimeoutMs || opts.timeoutMs || 150000,
+    pollMs: opts.pollMs || 2500,
+  });
+  return {
+    mediaStatus: 'video',
+    generationMode: 'text_to_video',
+    mediaFile: `media/${filePrefix}.mp4`,
+    localPath: mp4OutputPath,
+  };
 }
 
 function buildMuseFullVideoPrompt({ topic, rawScript, market = 'US', aspectRatio = '9:16', kind = 'story' }) {
@@ -606,6 +798,8 @@ module.exports = {
   sendMusePromptAndWaitForReply,
   waitForMuseVideoAndDownload,
   planScenesWithMuse,
+  attachFilesOnMuse,
+  buildMuseSceneVideoPrompt,
   generateSceneMediaWithMuse,
   buildMuseFullVideoPrompt,
   generateFullVideoWithMuse,
