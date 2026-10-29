@@ -465,6 +465,8 @@ async function openMuseGeminiChromeHandler() {
   }
 }
 
+let vgLastPlannedScript = '';
+
 async function vgMusePrimaryGenerateCurrent() {
   const rawScript = (document.getElementById('vgScriptInput')?.value || '').trim();
   if (!rawScript && !vgCurrentProjectId) {
@@ -474,7 +476,7 @@ async function vgMusePrimaryGenerateCurrent() {
   const btn = document.getElementById('vgMusePrimaryGenBtn');
   if (btn) {
     btn.disabled = true;
-    btn.innerText = '⏳ Đang triển khai qua Muse.ai (#1) ➔ Gemini Ultra (#2) + Render...';
+    btn.innerText = '⏳ Đang tạo hình ảnh 2D trên Muse.ai (#1) ➔ Gemini Ultra (#2) + Render...';
   }
 
   try {
@@ -484,7 +486,8 @@ async function vgMusePrimaryGenerateCurrent() {
       return;
     }
 
-    if (!vgCurrentProjectId || rawScript) {
+    if (!vgCurrentProjectId || vgLastPlannedScript !== rawScript) {
+      showToast('🎬 Bước 1/2: Đang chia phân cảnh kịch bản...');
       const planRes = await fetch('/api/video-gen/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -493,11 +496,13 @@ async function vgMusePrimaryGenerateCurrent() {
       const planJson = await planRes.json();
       if (!planJson.success) throw new Error(planJson.error);
       vgCurrentProjectId = planJson.data.id;
+      vgLastPlannedScript = rawScript;
       const projView = document.getElementById('vgProjectView');
       if (projView) projView.hidden = false;
       vgRenderProject(planJson.data);
     }
 
+    showToast('🎨 Bước 2/2: Đang tạo hình minh họa từng cảnh trên Muse.ai (#1) / Gemini Ultra (#2) + Giọng đọc & Render MP4...');
     await vgGenerateAndRender();
   } catch (err) {
     alert('Lỗi triển khai video Muse.ai / Gemini Ultra: ' + err.message);
@@ -709,6 +714,7 @@ async function vgPlanScenes() {
     if (!json.success) throw new Error(json.error);
 
     vgCurrentProjectId = json.data.id;
+    vgLastPlannedScript = rawScript;
     const projView = document.getElementById('vgProjectView');
     if (projView) projView.hidden = false;
     vgRenderProject(json.data);
@@ -737,7 +743,7 @@ async function vgInstantRenderCurrent() {
   }
 
   try {
-    if (!vgCurrentProjectId || rawScript) {
+    if (!vgCurrentProjectId || vgLastPlannedScript !== rawScript) {
       const planRes = await fetch('/api/video-gen/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -746,6 +752,7 @@ async function vgInstantRenderCurrent() {
       const planJson = await planRes.json();
       if (!planJson.success) throw new Error(planJson.error);
       vgCurrentProjectId = planJson.data.id;
+      vgLastPlannedScript = rawScript;
       const projView = document.getElementById('vgProjectView');
       if (projView) projView.hidden = false;
       vgRenderProject(planJson.data);
@@ -843,13 +850,21 @@ function vgRenderProject(project) {
   if (titleEl) titleEl.innerText = `Chi tiết phân cảnh (${(project.scenes || []).length} cảnh - ${project.title || ''})`;
 
   if (grid) {
-    grid.innerHTML = (project.scenes || []).map((scene, idx) => `
+    grid.innerHTML = (project.scenes || []).map((scene, idx) => {
+      const mediaFileName = scene.mediaFile ? scene.mediaFile.split(/[\\/]/).pop() : '';
+      const isImageMedia = /\.(png|jpe?g|webp)$/i.test(mediaFileName);
+      const mediaPreviewHtml = !mediaFileName
+        ? ''
+        : isImageMedia
+          ? `<img src="/media/${escapeHtml(mediaFileName)}?t=${Date.now()}" alt="Scene ${idx + 1}" style="width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-bottom:8px;background:#0f172a;border:1px solid rgba(255,255,255,0.12);" />`
+          : `<video src="/media/${escapeHtml(mediaFileName)}?t=${Date.now()}" controls muted></video>`;
+      return `
       <div class="vf-scene-card">
         <div class="vf-scene-status">
           <span>Cảnh #${idx + 1} (${escapeHtml(scene.visualMode || scene.type)})</span>
           <span>${escapeHtml(scene.mediaStatus || 'pending')}</span>
         </div>
-        ${scene.mediaFile ? `<video src="/media/${escapeHtml(scene.mediaFile.split(/[\\/]/).pop())}" controls muted></video>` : ''}
+        ${mediaPreviewHtml}
         <p style="color: #f8fafc; font-weight: 600;">🇻🇳 ${escapeHtml(scene.text)}</p>
         ${scene.textEn ? `<p style="font-size: 11.5px; color: #94a3b8;">🇬🇧 ${escapeHtml(scene.textEn)}</p>` : ''}
         ${scene.audioFile ? `<audio controls preload="none" src="/${escapeHtml(scene.audioFile)}?t=${Date.now()}" style="width:100%; height:28px; margin-top:4px;"></audio>` : ''}
@@ -857,7 +872,8 @@ function vgRenderProject(project) {
           <button class="btn btn-secondary btn-sm" onclick="vgRetryScene('${project.id}', '${scene.id}')">🔄 Tạo lại Media</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   const genBtn = document.getElementById('vgGenerateBtn');

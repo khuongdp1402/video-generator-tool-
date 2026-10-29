@@ -16,23 +16,37 @@
     font-family: ${FONT_FAMILY};
   }
   .frame { position: relative; width: 100%; height: 100%; }
+  .bg-blur {
+    position: absolute;
+    inset: -40px;
+    width: calc(100% + 80px);
+    height: calc(100% + 80px);
+    object-fit: cover;
+    filter: blur(32px) brightness(0.42) saturate(1.15);
+    transform-origin: center center;
+  }
   .bg {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+    top: 290px;
+    left: 36px;
+    width: calc(100% - 72px);
+    height: calc(100% - 720px);
+    object-fit: contain;
+    border-radius: 28px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.72);
     transform-origin: center center;
     will-change: transform;
+    z-index: 2;
   }
   .scrim {
     position: absolute;
     inset: 0;
-    background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.22) 48%, rgba(0,0,0,0.45) 100%);
+    background: linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.12) 32%, rgba(0,0,0,0.08) 72%, rgba(0,0,0,0.52) 100%);
+    z-index: 1;
   }
   .hero-badge-wrap {
     position: absolute;
-    top: 160px;
+    top: 84px;
     left: 60px;
     right: 60px;
     display: flex;
@@ -40,6 +54,7 @@
     align-items: center;
     text-align: center;
     pointer-events: none;
+    z-index: 3;
   }
   .scene-pill {
     font-size: 24px;
@@ -75,6 +90,7 @@
     border-radius: 999px;
     background: rgba(255,255,255,0.16);
     overflow: hidden;
+    z-index: 3;
   }
   .progress-bar-fill {
     height: 100%;
@@ -85,13 +101,14 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 110px;
+    bottom: 105px;
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
     gap: 10px 14px;
     padding: 0 60px;
     line-height: 1.45;
+    z-index: 3;
   }
   .subtitle.lang-ja {
     gap: 6px 3px;
@@ -146,6 +163,7 @@
 </head>
 <body>
   <div class="frame">
+    <img class="bg-blur" id="bgBlur" src="${IMAGE_DATA_URI}" />
     <img class="bg" id="bg" src="${IMAGE_DATA_URI}" />
     <div class="scrim"></div>
     <div class="hero-badge-wrap" id="heroWrap">
@@ -210,6 +228,8 @@
     document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
     bg.style.display = "none";
+    const bgBlur = document.getElementById("bgBlur");
+    if (bgBlur) bgBlur.style.display = "none";
   }
 
   if (LANGUAGE === "ja") {
@@ -217,17 +237,12 @@
   }
 
   if (SCENE_TYPE === "lesson") {
-    lessonCard.classList.add("visible");
-    subtitleEl.style.display = "none";
-    heroWrap.style.display = "none";
-    document.getElementById("lessonTitle").textContent = LESSON_TITLE || "Key Takeaway";
-    document.getElementById("lessonBody").textContent = SCENE_TEXT || "";
-  } else {
-    const joiner = LANGUAGE === "ja" ? "" : " ";
-    subtitleEl.innerHTML = WORDS.map((w, i) =>
-      `<span class="word" data-i="${i}">${w.word}</span>`
-    ).join(joiner);
+    scenePill.textContent = LESSON_TITLE || (LANGUAGE === "vi" ? "BÀI HỌC CỐT LÕI" : "KEY TAKEAWAY");
   }
+  const joiner = LANGUAGE === "ja" ? "" : " ";
+  subtitleEl.innerHTML = WORDS.map((w, i) =>
+    `<span class="word" data-i="${i}">${w.word}</span>`
+  ).join(joiner);
   const spans = subtitleEl.querySelectorAll(".word");
 
   window.setFrame = function (t) {
@@ -235,8 +250,6 @@
     const scale = 1 + (END_SCALE - 1) * progress;
     bg.style.transform = `scale(${scale})`;
     if (progressFill) progressFill.style.width = `${(progress * 100).toFixed(1)}%`;
-
-    if (SCENE_TYPE === "lesson") return;
 
     WORDS.forEach((w, i) => {
       const span = spans[i];

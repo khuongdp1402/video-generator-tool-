@@ -466,11 +466,98 @@ async function planScenesWithMuse(page, rawScript, kind = 'story', market = 'US'
   }
 }
 
-async function generateSceneMediaWithMuse(page, scene, mediaDir) {
-  const outputPath = path.join(mediaDir, `scene_${scene.id}.mp4`);
-  const prompt = scene.videoPrompt || scene.imagePrompt || scene.text;
-  await waitForMuseVideoAndDownload(page, prompt, outputPath);
-  return { mediaStatus: 'video', mediaFile: `media/scene_${scene.id}.mp4` };
+async function getLargeImageSrcsOnMuse(page) {
+  if (typeof page.evaluate !== 'function') return [];
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('img'))
+        .filter(
+          (im) =>
+            !im.closest('[data-hatch-avatar-interaction]') &&
+            (im.naturalWidth || im.width) > 200
+        )
+        .map((im) => im.src)
+        .filter(Boolean)
+    )
+    .catch(() => []);
+}
+
+async function extractNewestLargeImagePngOnMuse(page, knownSrcs = []) {
+  if (typeof page.evaluate !== 'function') return null;
+  return page
+    .evaluate((prevSrcs) => {
+      const prevSet = new Set(prevSrcs || []);
+      const imgs = Array.from(document.querySelectorAll('img')).filter(
+        (im) =>
+          im.complete &&
+          !im.closest('[data-hatch-avatar-interaction]') &&
+          (im.naturalWidth || im.width) > 250 &&
+          (im.naturalHeight || im.height) > 250 &&
+          im.src &&
+          !prevSet.has(im.src)
+      );
+      if (imgs.length === 0) return null;
+      const target = imgs[imgs.length - 1];
+      const c = document.createElement('canvas');
+      c.width = target.naturalWidth || target.width;
+      c.height = target.naturalHeight || target.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(target, 0, 0);
+      const dataUrl = c.toDataURL('image/png');
+      const commaIdx = dataUrl.indexOf(',');
+      return commaIdx > -1 ? dataUrl.slice(commaIdx + 1) : null;
+    }, knownSrcs)
+    .catch(() => null);
+}
+
+async function generateSceneMediaWithMuse(page, scene, mediaDir, opts = {}) {
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const filePrefix = opts.projectId ? `${opts.projectId}_scene_${scene.id}` : `scene_${scene.id}`;
+  const pngOutputPath = path.join(mediaDir, `${filePrefix}.png`);
+  const mp4OutputPath = path.join(mediaDir, `${filePrefix}.mp4`);
+
+  const knownImgSrcs = await getLargeImageSrcsOnMuse(page);
+  const initialVideoCount = await countNonAvatarVideos(page);
+
+  const rawPrompt = scene.imagePrompt || scene.videoPrompt || scene.text;
+  const imageRequestPrompt =
+    `Generate a single 2D illustration image right now (do not ask questions, call your image generation tool immediately): ${rawPrompt}`;
+
+  await submitPromptOnMuse(page, imageRequestPrompt);
+
+  const timeoutMs = opts.timeoutMs || 55000;
+  const pollMs = opts.pollMs || 2000;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const pngBase64 = await extractNewestLargeImagePngOnMuse(page, knownImgSrcs);
+    if (pngBase64) {
+      const buf = Buffer.from(pngBase64, 'base64');
+      if (buf.length > 2000) {
+        fs.writeFileSync(pngOutputPath, buf);
+        console.log(`[Muse.ai] Đã tạo & lưu ảnh minh họa Scene ${scene.id}: ${pngOutputPath} (${buf.length} bytes)`);
+        return {
+          mediaStatus: 'image',
+          mediaFile: `media/${filePrefix}.png`,
+          localPath: pngOutputPath,
+        };
+      }
+    }
+
+    const videoUrl = await extractLatestVideoUrl(page, initialVideoCount);
+    if (videoUrl) {
+      await downloadVideoUrlOrBlobToDisk(page, videoUrl, mp4OutputPath);
+      return {
+        mediaStatus: 'video',
+        mediaFile: `media/${filePrefix}.mp4`,
+        localPath: mp4OutputPath,
+      };
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  throw new Error(`Hết thời gian chờ Muse.ai tạo hình ảnh cho Scene ${scene.id}`);
 }
 
 function buildMuseFullVideoPrompt({ topic, rawScript, market = 'US', aspectRatio = '9:16', kind = 'story' }) {
